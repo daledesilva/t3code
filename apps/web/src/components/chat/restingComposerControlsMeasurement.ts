@@ -80,6 +80,8 @@ export function measureRestingComposerControls(
 ): RestingComposerControlsMeasurement | null {
   const gap = Number.parseFloat(getComputedStyle(controls).columnGap) || 0;
   const picker = controls.querySelector<HTMLElement>("[data-chat-provider-model-picker]");
+  const pinTrigger = controls.querySelector<HTMLElement>("[data-chat-provider-model-pin-button]");
+  const pinTriggerWidth = pinTrigger ? elementOuterWidth(pinTrigger) : 0;
   const leadingControl =
     picker ?? controls.querySelector<HTMLElement>('[data-chat-provider-unavailable="true"]');
   if (!leadingControl) return null;
@@ -95,11 +97,15 @@ export function measureRestingComposerControls(
   return {
     gap,
     naturalFixedWidth:
-      (picker ? providerModelPickerNaturalWidth(picker) : elementOuterWidth(leadingControl)) +
+      (picker
+        ? providerModelPickerNaturalWidth(picker) + pinTriggerWidth
+        : elementOuterWidth(leadingControl)) +
       pinsAndGapWidth +
       separatorAndGapWidth,
     minimumFixedWidth:
-      (picker ? providerModelPickerMinimumWidth(picker) : elementOuterWidth(leadingControl)) +
+      (picker
+        ? providerModelPickerMinimumWidth(picker) + pinTriggerWidth
+        : elementOuterWidth(leadingControl)) +
       pinsAndGapWidth +
       separatorAndGapWidth,
     blockWidths: widths.map((width) => width.natural),

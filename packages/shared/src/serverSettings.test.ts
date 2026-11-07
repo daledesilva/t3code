@@ -920,6 +920,20 @@ describe("synchronized model preferences", () => {
     expect(applyServerSettingsPatch(removed, removeFast).pins).toEqual([
       { provider, model: "sol", options: standardHighOptions },
     ]);
+    const renamed = applyServerSettingsPatch(removed, {
+      setModelPins: [
+        { provider, model: "sol", options: standardHighOptions, label: "My Fast Sol", pin: true },
+      ],
+    });
+    expect(renamed.pins).toEqual([
+      { provider, model: "sol", options: standardHighOptions, label: "My Fast Sol" },
+    ]);
+    const clearedLabel = applyServerSettingsPatch(renamed, {
+      setModelPins: [
+        { provider, model: "sol", options: standardHighOptions, label: null, pin: true },
+      ],
+    });
+    expect(clearedLabel.pins).toEqual([{ provider, model: "sol", options: standardHighOptions }]);
   });
 
   it("preserves unrelated models and providers during bulk visibility and order edits", () => {

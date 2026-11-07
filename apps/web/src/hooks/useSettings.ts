@@ -605,6 +605,31 @@ export function useToggleEnvironmentModelPin(environmentId: EnvironmentId | null
   };
 }
 
+export function useRenameEnvironmentModelPin(environmentId: EnvironmentId | null) {
+  const save = useUpdateEnvironmentModelPreferences(environmentId);
+  return async (
+    provider: ProviderInstanceId,
+    model: string,
+    options: ReadonlyArray<ProviderOptionSelection> | undefined,
+    label: string | null,
+  ) => {
+    if (!environmentId) return;
+    const normalizedOptions = options && options.length > 0 ? [...options] : undefined;
+    const trimmed = label?.trim() ?? "";
+    await save({
+      setModelPins: [
+        {
+          provider,
+          model,
+          ...(normalizedOptions ? { options: normalizedOptions } : {}),
+          label: trimmed.length > 0 ? trimmed : null,
+          pin: true,
+        },
+      ],
+    });
+  };
+}
+
 const noEnvironmentSettingsAtom = Atom.make<ServerSettings | null>(null);
 
 export function useEnvironmentModelPreferences(environmentId: EnvironmentId | null) {

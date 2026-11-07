@@ -355,6 +355,7 @@ export const ModelPin = Schema.Struct({
   provider: ProviderInstanceId,
   model: TrimmedNonEmptyString,
   options: Schema.optionalKey(ProviderOptionSelections),
+  label: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type ModelPin = typeof ModelPin.Type;
 export const ModelPins = Schema.Array(ModelPin);
@@ -1656,7 +1657,13 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
   ),
   setModelPins: Schema.optionalKey(
-    Schema.Array(Schema.Struct({ ...ModelPin.fields, pin: Schema.Boolean })),
+    Schema.Array(
+      Schema.Struct({
+        ...ModelPin.fields,
+        label: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
+        pin: Schema.Boolean,
+      }),
+    ),
   ),
   setModelsHidden: Schema.optionalKey(
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, hidden: Schema.Boolean })),

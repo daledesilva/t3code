@@ -5,7 +5,6 @@ import {
   selectableProviderOptionChoices,
 } from "@t3tools/client-runtime/model-traits";
 import type {
-  EnvironmentId,
   ModelSelection,
   ProviderDriverKind,
   ProviderOptionDescriptor,
@@ -14,14 +13,11 @@ import type {
 } from "@t3tools/contracts";
 import type { EffortDisplay } from "@t3tools/contracts/settings";
 import { getProviderOptionCurrentLabel } from "@t3tools/shared/model";
-import { modelPinsEqual } from "@t3tools/shared/serverSettings";
-import { CheckIcon, ChevronRightIcon, ChevronUpIcon, PinIcon, WorkflowIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon, ChevronUpIcon, WorkflowIcon } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, use, useRef, useState } from "react";
 
-import { useEnvironmentModelPreferences, useToggleEnvironmentModelPin } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
 import {
   Menu,
   MenuPopup,
@@ -256,7 +252,7 @@ export function describeComposerEffort(
 }
 
 const COLUMN_ROW =
-  "flex h-8 w-full shrink-0 cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-sm text-foreground outline-none group-hover:bg-foreground/[0.09] hover:bg-foreground/[0.09] focus-visible:bg-foreground/[0.09] disabled:cursor-not-allowed disabled:opacity-64";
+  "flex h-8 w-full shrink-0 cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-sm text-foreground outline-none hover:bg-foreground/[0.09] focus-visible:bg-foreground/[0.09] disabled:cursor-not-allowed disabled:opacity-64";
 const COLUMN_LABEL = "px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs";
 
 function ColumnRow(props: {
@@ -268,8 +264,6 @@ function ColumnRow(props: {
   tabStop: boolean;
   isDefault?: boolean | undefined;
   disabled?: boolean;
-  isPinned?: boolean | undefined;
-  onTogglePin?: (() => void) | undefined;
   onPick: () => void;
 }) {
   const rowProps = {
@@ -282,7 +276,7 @@ function ColumnRow(props: {
     "data-effort-level": true,
     // Up and Down move between rows.
     tabIndex: props.tabStop ? 0 : -1,
-    className: cn(COLUMN_ROW, props.onTogglePin && "pe-8"),
+    className: COLUMN_ROW,
     onClick: props.onPick,
   } as const;
   const content = (
@@ -301,53 +295,14 @@ function ColumnRow(props: {
       ) : null}
     </>
   );
-  const button = !props.description ? (
-    <button {...rowProps}>{content}</button>
-  ) : (
+  if (!props.description) return <button {...rowProps}>{content}</button>;
+  return (
     <Tooltip>
       <TooltipTrigger render={<button {...rowProps} />}>{content}</TooltipTrigger>
       <TooltipPopup side="right" className="max-w-56">
         {props.description}
       </TooltipPopup>
     </Tooltip>
-  );
-  if (!props.onTogglePin) return button;
-  return (
-    <div className="group relative flex items-center">
-      {button}
-      <div className="absolute right-1.5 flex items-center">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-xs"
-                variant="ghost-muted"
-                tabIndex={-1}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  props.onTogglePin?.();
-                }}
-                onKeyDown={(event) => {
-                  event.stopPropagation();
-                }}
-                disabled={props.disabled}
-                aria-label={props.isPinned ? "Unpin model" : "Pin model"}
-              >
-                <PinIcon
-                  className={cn(
-                    "size-3.5 sm:size-3",
-                    props.isPinned && "fill-current text-primary",
-                    !props.isPinned &&
-                      "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 in-focus-visible:opacity-100 pointer-coarse:opacity-100",
-                  )}
-                />
-              </Button>
-            }
-          />
-          <TooltipPopup side="top">{props.isPinned ? "Unpin model" : "Pin model"}</TooltipPopup>
-        </Tooltip>
-      </div>
-    </div>
   );
 }
 
@@ -368,13 +323,8 @@ function moveBetweenRows(event: KeyboardEvent<HTMLElement>) {
   next.scrollIntoView({ block: "nearest" });
 }
 
-function EffortLevels(props: {
-  environmentId?: EnvironmentId | null | undefined;
-  traits: TraitsSelectionInput;
-}) {
+function EffortLevels(props: { traits: TraitsSelectionInput }) {
   const traits = useTraitsSelection(props.traits);
-  const { pins } = useEnvironmentModelPreferences(props.environmentId ?? null);
-  const togglePin = useToggleEnvironmentModelPin(props.environmentId ?? null);
   const { effort, others } = columnControls(
     props.traits.provider,
     traits.selectDescriptors,
@@ -399,34 +349,9 @@ function EffortLevels(props: {
   // Ultrathink in the prompt locks the levels; the first option then holds the tab stop.
   const locked =
     effort?.descriptor.id === traits.primarySelectDescriptor?.id && traits.ultrathinkInBodyText;
-  const modelSelection =
-    props.traits.instanceId && props.traits.model
-      ? {
-          instanceId: props.traits.instanceId,
-          model: props.traits.model,
-          options: props.traits.modelOptions ?? [],
-        }
-      : null;
-  const speedMode = resolveModelSpeedMode({
-    provider: props.traits.provider,
-    descriptors: traits.descriptors,
-    modelSelection,
-    reportedModelSelection: props.traits.reportedModelSelection,
-  });
   return (
     <>
-      {effort ? (
-        <EffortRows
-          control={effort}
-          traits={traits}
-          locked={locked}
-          instanceId={props.traits.instanceId}
-          model={props.traits.model}
-          speedOption={speedMode?.option ?? null}
-          pins={pins}
-          onTogglePin={togglePin}
-        />
-      ) : null}
+      {effort ? <EffortRows control={effort} traits={traits} locked={locked} /> : null}
       {others.length > 0 ? (
         <div
           className={cn("flex flex-col gap-0.5", effort && "mt-1 border-t border-border/70 pt-1")}
@@ -456,56 +381,21 @@ function EffortLevels(props: {
 
 type TraitsSelection = ReturnType<typeof useTraitsSelection>;
 
-function EffortRows(props: {
-  control: ColumnControl;
-  traits: TraitsSelection;
-  locked: boolean;
-  instanceId?: TraitsSelectionInput["instanceId"];
-  model?: TraitsSelectionInput["model"];
-  speedOption: ProviderOptionSelection | null;
-  pins: ReturnType<typeof useEnvironmentModelPreferences>["pins"];
-  onTogglePin: ReturnType<typeof useToggleEnvironmentModelPin>;
-}) {
-  const { control, traits, instanceId, model, speedOption, pins, onTogglePin } = props;
+function EffortRows(props: { control: ColumnControl; traits: TraitsSelection; locked: boolean }) {
+  const { control, traits } = props;
   const { descriptor } = control;
-  const buildPinOptions = (
-    reasoningOption: ProviderOptionSelection,
-  ): ReadonlyArray<ProviderOptionSelection> =>
-    speedOption ? [reasoningOption, speedOption] : [reasoningOption];
-  const isRowPinned = (reasoningOption: ProviderOptionSelection) => {
-    if (!instanceId || !model) return false;
-    const candidateOptions = buildPinOptions(reasoningOption);
-    return pins.some((pin) =>
-      modelPinsEqual(pin, {
-        provider: instanceId,
-        model,
-        options: candidateOptions,
-      }),
-    );
-  };
   if (control.kind === "boolean") {
     return (
       <div role="radiogroup" aria-label={descriptor.label} className="flex flex-col gap-0.5">
-        {([true, false] as const).map((value) => {
-          const reasoningOption: ProviderOptionSelection = { id: descriptor.id, value };
-          return (
-            <ColumnRow
-              key={String(value)}
-              label={value ? "On" : "Off"}
-              selected={(control.descriptor.currentValue === true) === value}
-              tabStop={(control.descriptor.currentValue === true) === value}
-              isPinned={isRowPinned(reasoningOption)}
-              onTogglePin={
-                instanceId && model
-                  ? () => {
-                      void onTogglePin(instanceId, model, buildPinOptions(reasoningOption));
-                    }
-                  : undefined
-              }
-              onPick={() => traits.changeBoolean(descriptor.id, value)}
-            />
-          );
-        })}
+        {([true, false] as const).map((value) => (
+          <ColumnRow
+            key={String(value)}
+            label={value ? "On" : "Off"}
+            selected={(control.descriptor.currentValue === true) === value}
+            tabStop={(control.descriptor.currentValue === true) === value}
+            onPick={() => traits.changeBoolean(descriptor.id, value)}
+          />
+        ))}
       </div>
     );
   }
@@ -521,29 +411,18 @@ function EffortRows(props: {
           {ULTRATHINK_IN_BODY_NOTE}
         </div>
       ) : null}
-      {choices.map((option, index) => {
-        const reasoningOption: ProviderOptionSelection = { id: descriptor.id, value: option.id };
-        return (
-          <ColumnRow
-            key={option.id}
-            label={option.label}
-            selected={option.id === value}
-            tabStop={shown ? option.id === value : index === 0}
-            description={option.description}
-            isDefault={option.isDefault}
-            disabled={locked}
-            isPinned={isRowPinned(reasoningOption)}
-            onTogglePin={
-              instanceId && model
-                ? () => {
-                    void onTogglePin(instanceId, model, buildPinOptions(reasoningOption));
-                  }
-                : undefined
-            }
-            onPick={() => traits.changeSelect(control.descriptor, option.id)}
-          />
-        );
-      })}
+      {choices.map((option, index) => (
+        <ColumnRow
+          key={option.id}
+          label={option.label}
+          selected={option.id === value}
+          tabStop={shown ? option.id === value : index === 0}
+          description={option.description}
+          isDefault={option.isDefault}
+          disabled={locked}
+          onPick={() => traits.changeSelect(control.descriptor, option.id)}
+        />
+      ))}
     </div>
   );
 }
@@ -693,10 +572,7 @@ function NoEffortRow() {
 }
 
 /** The model picker's effort column: the selected model's levels and its other options. */
-export function ComposerEffortColumn(props: {
-  environmentId?: EnvironmentId | null | undefined;
-  traits: TraitsSelectionInput | null;
-}) {
+export function ComposerEffortColumn(props: { traits: TraitsSelectionInput | null }) {
   const picker = use(DockedPickerContext);
   const visibility = props.traits ? getTraitsSectionVisibility(props.traits) : null;
   const controls =
@@ -726,11 +602,7 @@ export function ComposerEffortColumn(props: {
         // Capture, so Up and Down on an option row move rows instead of opening its menu.
         onKeyDownCapture={moveBetweenRows}
       >
-        {props.traits ? (
-          <EffortLevels environmentId={props.environmentId} traits={props.traits} />
-        ) : (
-          <NoEffortRow />
-        )}
+        {props.traits ? <EffortLevels traits={props.traits} /> : <NoEffortRow />}
       </div>
     </>
   );

@@ -480,14 +480,27 @@ export function applyServerSettingsPatch(
       (current, change) => {
         const normalizedOptions =
           change.options && change.options.length > 0 ? [...change.options] : undefined;
+        const normalizedLabel =
+          typeof change.label === "string" && change.label.trim().length > 0
+            ? change.label.trim()
+            : undefined;
         const targetPin: ModelPin = {
           provider: change.provider,
           model: change.model,
           ...(normalizedOptions ? { options: normalizedOptions } : {}),
+          ...(normalizedLabel ? { label: normalizedLabel } : {}),
         };
-        const exists = current.some((pin) => modelPinsEqual(pin, targetPin));
+        const existingIndex = current.findIndex((pin) => modelPinsEqual(pin, targetPin));
         if (change.pin) {
-          if (!exists) current.push(targetPin);
+          if (existingIndex === -1) {
+            current.push(targetPin);
+          } else if (change.label !== undefined) {
+            const existing = current[existingIndex]!;
+            const { label: _existingLabel, ...restExisting } = existing;
+            current[existingIndex] = normalizedLabel
+              ? { ...restExisting, label: normalizedLabel }
+              : restExisting;
+          }
           return current;
         }
         return current.filter((pin) => !modelPinsEqual(pin, targetPin));

@@ -155,4 +155,109 @@ describe("UsageLimitRecoveryCard", () => {
 
     expect(snooze()?.disabled).toBe(true);
   });
+
+  it("hides the stopped-run recovery card when the thread switches to a model in another usage pool", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    using _root = { [Symbol.dispose]: () => act(() => root.unmount()) };
+    const thread = {
+      ...failedThread(new Date(DAY_MS).toISOString()),
+      modelSelection: { instanceId: "antigravity", model: "claude-sonnet-4-6" },
+    } as unknown as EnvironmentThreadShell;
+    act(() =>
+      root.render(
+        <UsageLimitRecoveryCard
+          thread={thread}
+          environmentId={"env-1" as EnvironmentId}
+          limitedModelSelection={
+            {
+              instanceId: "antigravity",
+              model: "gemini-2.5-pro",
+            } as EnvironmentThreadShell["modelSelection"]
+          }
+          providers={[
+            {
+              instanceId: "antigravity",
+              driver: "antigravity",
+              displayName: "Antigravity",
+              enabled: true,
+              status: "ready",
+              available: true,
+              installed: true,
+              version: null,
+              auth: { status: "authenticated" },
+              models: [],
+              slashCommands: [],
+              skills: [],
+              supportsManualCompaction: true,
+              supportedRuntimeModes: ["full-access"],
+            } as never,
+          ]}
+        />,
+      ),
+    );
+    expect(container.textContent).toBe("");
+  });
+
+  it("shows a proactive usage-limit notice without recovery buttons when the selected model is exhausted", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    using _root = { [Symbol.dispose]: () => act(() => root.unmount()) };
+    const thread = {
+      id: "thread-1",
+      updatedAt: new Date(0).toISOString(),
+      snoozedUntil: null,
+      latestRun: null,
+      limitRecovery: null,
+      runtime: null,
+      modelSelection: { instanceId: "antigravity", model: "gemini-2.5-pro" },
+    } as unknown as EnvironmentThreadShell;
+    act(() =>
+      root.render(
+        <UsageLimitRecoveryCard
+          thread={thread}
+          environmentId={"env-1" as EnvironmentId}
+          providers={[
+            {
+              instanceId: "antigravity",
+              driver: "antigravity",
+              displayName: "Antigravity",
+              enabled: true,
+              status: "ready",
+              available: true,
+              installed: true,
+              version: null,
+              auth: { status: "authenticated" },
+              models: [
+                {
+                  slug: "gemini-2.5-pro",
+                  name: "Gemini 2.5 Pro",
+                  isCustom: false,
+                  capabilities: null,
+                },
+              ],
+              slashCommands: [],
+              skills: [],
+              supportsManualCompaction: true,
+              supportedRuntimeModes: ["full-access"],
+              usageLimits: {
+                checkedAt: "1970-01-01T00:00:00.000Z",
+                windows: [
+                  {
+                    id: "gemini",
+                    kind: "weekly",
+                    label: "Gemini",
+                    usedPercent: 100,
+                    resetsAt: "1970-01-02T00:00:00.000Z",
+                  },
+                ],
+              },
+            } as never,
+          ]}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain("Usage limit reached for Gemini 2.5 Pro.");
+    expect(container.querySelectorAll("button")).toHaveLength(0);
+  });
 });

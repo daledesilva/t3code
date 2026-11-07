@@ -1,8 +1,13 @@
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { AsyncResult } from "effect/reactivity";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { limitRecoveryOwnsSnooze } from "@t3tools/client-runtime/state/thread-execution";
-import type { EnvironmentId } from "@t3tools/contracts";
+import {
+  limitRecoveryOwnsSnooze,
+  resolveExhaustedModelUsageLimit,
+  shouldShowUsageLimitRecovery,
+} from "@t3tools/client-runtime/state/thread-execution";
+import type { EnvironmentId, ModelSelection, ServerProvider } from "@t3tools/contracts";
+import { formatModelSlugName } from "@t3tools/shared/model";
 import {
   CHATGPT_USAGE_LIMIT_CODE,
   CHATGPT_USAGE_URL,
@@ -21,9 +26,13 @@ import { useAtomCommand } from "../../state/use-atom-command";
 export function UsageLimitRecoveryCard({
   thread,
   environmentId,
+  providers = [],
+  limitedModelSelection,
 }: {
   thread: EnvironmentThreadShell;
   environmentId: EnvironmentId;
+  providers?: ReadonlyArray<ServerProvider>;
+  limitedModelSelection?: ModelSelection | null;
 }) {
   const updateMetadata = useAtomCommand(threadEnvironment.updateMetadata);
   const [pending, setPending] = useState(false);
@@ -52,13 +61,52 @@ export function UsageLimitRecoveryCard({
   // OpenAI's partner guidelines specify the ChatGPT notice and its action.
   const workspaceLimit = code === CHATGPT_WORKSPACE_USAGE_LIMIT_CODE;
   const chatGptLimit = workspaceLimit || code === CHATGPT_USAGE_LIMIT_CODE;
-  if (
-    thread.runtime?.status !== "failed" ||
+  const hasStoppedLimitRun =
+    thread.runtime?.status === "failed" &&
     // Older servers report ChatGPT sharing limits as provider errors.
-    (thread.runtime.lastErrorClass !== "usage_limit" && !chatGptLimit) ||
-    !runId
-  )
-    return null;
+    (thread.runtime.lastErrorClass === "usage_limit" || chatGptLimit) &&
+    Boolean(runId);
+  const showStoppedLimitRecovery =
+    hasStoppedLimitRun &&
+    (!thread.modelSelection ||
+      shouldShowUsageLimitRecovery({
+        selectedModelSelections: [thread.modelSelection],
+        limitedModelSelection: limitedModelSelection ?? thread.modelSelection,
+        providers,
+      }));
+  const exhaustedModelLimit =
+    !showStoppedLimitRecovery && thread.modelSelection
+      ? resolveExhaustedModelUsageLimit({
+          selectedModelSelections: [thread.modelSelection],
+          providers,
+        })
+      : null;
+  if (exhaustedModelLimit !== null) {
+    const modelName =
+      exhaustedModelLimit.provider.models.find(
+        (candidate) => candidate.slug === exhaustedModelLimit.modelSelection.model,
+      )?.name ?? formatModelSlugName(exhaustedModelLimit.modelSelection.model);
+    const exhaustedResetText = exhaustedModelLimit.resetsAt
+      ? `Resets ${new Date(exhaustedModelLimit.resetsAt).toLocaleString(undefined, {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })}.`
+      : null;
+    return (
+      <View className="mx-3 mb-2 flex-row gap-2 rounded-xl border border-warning-foreground/25 bg-screen p-3">
+        <View className="min-w-0 flex-1 gap-1">
+          <Text className="text-sm text-warning-foreground">
+            {exhaustedResetText
+              ? `Usage limit reached for ${modelName}. ${exhaustedResetText}`
+              : `Usage limit reached for ${modelName}.`}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+  if (!showStoppedLimitRecovery || !runId) return null;
   const resetText = displayAt
     ? `${canSchedule && scheduled ? "Resumes" : "Resets"} ${new Date(displayAt).toLocaleString(
         undefined,

@@ -47,6 +47,7 @@ import {
   ComposerEffortColumn,
   ComposerPickerFooter,
   describeComposerEffort,
+  describePinnedModelEffort,
 } from "./ComposerModelEffort";
 import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
@@ -114,7 +115,6 @@ const PINNED_MODEL_SUBMIT_PILL =
 export function ComposerPinnedModelsRow(props: {
   environmentId: EnvironmentId;
   planModeEnabled: boolean;
-  effortDisplay: EffortDisplay;
   showProviderUnavailable: boolean;
   providerCatalogPending: boolean;
   isSendBusy: boolean;
@@ -132,7 +132,6 @@ export function ComposerPinnedModelsRow(props: {
   const {
     environmentId,
     planModeEnabled,
-    effortDisplay,
     showProviderUnavailable,
     providerCatalogPending,
     isSendBusy,
@@ -200,10 +199,11 @@ export function ComposerPinnedModelsRow(props: {
       planModeEnabled,
       onModelOptionsChange: () => {},
     };
-    const pinEffort = describeComposerEffort(pinTraitsInput, effortDisplay, "sm", "action");
+    const pinEffort = describePinnedModelEffort(pinTraitsInput, "sm");
     const defaultTriggerTitle = resolvedModelOption
       ? getTriggerDisplayModelName(resolvedModelOption, entry.driverKind)
       : pin.model;
+    const hasCustomName = Boolean(pin.label);
     const triggerTitle = pin.label ?? defaultTriggerTitle;
     const triggerLabel = resolvedModelOption
       ? getDisplayModelName(resolvedModelOption)
@@ -294,7 +294,6 @@ export function ComposerPinnedModelsRow(props: {
           className={cn(PINNED_MODEL_SUBMIT_PILL, toneClassName)}
         >
           {backdropArt}
-          {iconElement}
           <PinnedModelRenameInput
             initialValue={pin.label ?? defaultTriggerTitle}
             placeholder={defaultTriggerTitle}
@@ -308,8 +307,6 @@ export function ComposerPinnedModelsRow(props: {
             }}
             onCancel={() => setRenamingPinKey(null)}
           />
-          {pinEffort.suffix}
-          {upArrowIcon}
         </div>,
       ];
     }
@@ -348,10 +345,16 @@ export function ComposerPinnedModelsRow(props: {
       >
         {backdropArt}
         <span className="flex min-w-0 items-center gap-1.5">
-          {iconElement}
-          <span className="max-w-40 min-w-0 truncate">{triggerTitle}</span>
-          {pinEffort.suffix}
-          {upArrowIcon}
+          {hasCustomName ? (
+            <span className="max-w-40 min-w-0 truncate">{triggerTitle}</span>
+          ) : (
+            <>
+              {iconElement}
+              <span className="max-w-40 min-w-0 truncate">{triggerTitle}</span>
+              {pinEffort.suffix}
+              {upArrowIcon}
+            </>
+          )}
         </span>
       </button>
     );
@@ -372,7 +375,7 @@ export function ComposerPinnedModelsRow(props: {
     <div
       data-chat-model-pins="true"
       className={cn(
-        "flex min-w-0 flex-wrap items-center justify-center gap-1.5 px-3 pb-1.5",
+        "flex min-w-0 flex-wrap items-center justify-end gap-1.5 px-2 pb-1.5",
         props.className,
       )}
     >

@@ -13,11 +13,19 @@ import type {
 } from "@t3tools/contracts";
 import type { EffortDisplay } from "@t3tools/contracts/settings";
 import { getProviderOptionCurrentLabel } from "@t3tools/shared/model";
-import { CheckIcon, ChevronRightIcon, ChevronUpIcon, WorkflowIcon } from "lucide-react";
+import {
+  BrainIcon,
+  CheckIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  GaugeIcon,
+  LayersIcon,
+  SparklesIcon,
+  WorkflowIcon,
+} from "lucide-react";
 import { type KeyboardEvent, type ReactNode, use, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
-import { Badge } from "../ui/badge";
 import {
   Menu,
   MenuPopup,
@@ -142,15 +150,14 @@ function columnControls(
 }
 
 /**
- * What the model trigger shows after the model name: a Fast/Standard chip when supported, the
- * effort word (or bars, per the Appearance setting), a workflow icon for Ultracode, and other
- * traits such as a context window.
+ * What the model trigger shows after the model name: the effort word (or bars, per the
+ * Appearance setting), a bolt for Fast, a workflow icon for Ultracode, and other traits
+ * such as a context window.
  */
 export function describeComposerEffort(
   traits: TraitsSelectionInput | null,
   effortDisplay: EffortDisplay,
   size: ComposerControlSize,
-  tone: "default" | "action" = "default",
 ): { suffix: ReactNode; detail: string | null } {
   if (!traits) return { suffix: null, detail: null };
   const visibility = getTraitsSectionVisibility(traits);
@@ -168,14 +175,6 @@ export function describeComposerEffort(
     modelSelection,
     reportedModelSelection: traits.reportedModelSelection,
   });
-  const speedMode = !visibility.modelIsUnavailable
-    ? resolveModelSpeedMode({
-        provider: traits.provider,
-        descriptors: visibility.descriptors,
-        modelSelection,
-        reportedModelSelection: traits.reportedModelSelection,
-      })
-    : null;
   // The same reasoning control the column lists, wherever the agent put it among its options.
   const reasoning =
     columnControls(traits.provider, visibility.selectDescriptors, visibility.booleanDescriptors)
@@ -209,31 +208,18 @@ export function describeComposerEffort(
       modelSelection,
       traits.reportedModelSelection,
     );
-  if (!speedMode && !word && !glyph && !fast && !display.ultracode && !contextWindow)
+  if (!word && !glyph && !fast && !display.ultracode && !contextWindow)
     return { suffix: null, detail: display.label };
   return {
     detail: display.label,
     suffix: (
       <span
         className={cn(
-          "flex shrink-0 items-center gap-1.5",
-          tone === "action"
-            ? "text-current/90 group-hover/model-trigger:text-current"
-            : "text-muted-foreground group-hover/model-trigger:text-foreground group-data-pressed/model-trigger:text-foreground group-data-popup-open/model-trigger:text-foreground",
+          "flex shrink-0 items-center gap-1.5 text-muted-foreground group-hover/model-trigger:text-foreground group-data-pressed/model-trigger:text-foreground group-data-popup-open/model-trigger:text-foreground",
           // A word space after the model name: the regular trigger's gap is wider than one.
           size === "sm" && "-ms-0.5",
         )}
       >
-        {speedMode ? (
-          <Badge
-            variant={tone === "action" ? "secondary" : "outline"}
-            size="sm"
-            data-composer-control-label
-            className="shrink-0"
-          >
-            {speedMode.label}
-          </Badge>
-        ) : null}
         {word ? (
           <span data-composer-control-label className="max-w-24 truncate">
             {word}
@@ -241,7 +227,7 @@ export function describeComposerEffort(
         ) : glyph ? (
           <EffortGlyph count={glyph.count} filled={glyph.filled} size={size} />
         ) : null}
-        {fast && !speedMode ? <FastBolt ultra={display.speedLabel === "Ultrafast"} /> : null}
+        {fast ? <FastBolt ultra={display.speedLabel === "Ultrafast"} /> : null}
         {display.ultracode ? (
           <WorkflowIcon aria-hidden="true" data-composer-control-icon className="size-3" />
         ) : null}
@@ -254,6 +240,88 @@ export function describeComposerEffort(
           >
             {contextWindow}
           </span>
+        ) : null}
+      </span>
+    ),
+  };
+}
+
+/**
+ * Icon-only traits summary for pinned model submit buttons: effort bars or icon, Fast bolt
+ * when applied (never Standard), Ultracode workflow icon, and context window icon.
+ */
+export function describePinnedModelEffort(
+  traits: TraitsSelectionInput | null,
+  size: ComposerControlSize,
+): { suffix: ReactNode; detail: string | null } {
+  if (!traits) return { suffix: null, detail: null };
+  const visibility = getTraitsSectionVisibility(traits);
+  if (!visibility.hasAnyControls) return { suffix: null, detail: null };
+  const modelSelection =
+    traits.instanceId && traits.model
+      ? { instanceId: traits.instanceId, model: traits.model, options: traits.modelOptions ?? [] }
+      : null;
+  const primary = visibility.primarySelectDescriptor;
+  const display = buildTraitsTriggerDisplay({
+    provider: traits.provider,
+    descriptors: visibility.descriptors,
+    primarySelectDescriptorId: primary?.id ?? null,
+    ultrathinkPromptControlled: visibility.ultrathinkPromptControlled,
+    modelSelection,
+    reportedModelSelection: traits.reportedModelSelection,
+  });
+  const reasoning =
+    columnControls(traits.provider, visibility.selectDescriptors, visibility.booleanDescriptors)
+      .effort?.descriptor ?? null;
+  const ultrathink = visibility.ultrathinkPromptControlled && reasoning === primary;
+  const glyph =
+    reasoning?.type === "select"
+      ? resolveEffortGlyph(
+          reasoning,
+          ultrathink
+            ? "ultrathink"
+            : getDescriptorStringValue(reasoning, modelSelection, traits.reportedModelSelection),
+        )
+      : null;
+  const reasoningIcon =
+    glyph && !glyph.special ? (
+      glyph.filled > 0 ? (
+        <EffortGlyph count={glyph.count} filled={glyph.filled} size={size} />
+      ) : null
+    ) : glyph?.special === "Ultracode" ? (
+      <WorkflowIcon aria-hidden="true" data-composer-control-icon className="size-3" />
+    ) : glyph?.special || ultrathink ? (
+      <SparklesIcon aria-hidden="true" data-composer-control-icon className="size-3" />
+    ) : reasoning?.type === "boolean" ? (
+      reasoning.currentValue === true ? (
+        <BrainIcon aria-hidden="true" data-composer-control-icon className="size-3" />
+      ) : null
+    ) : reasoning?.type === "select" &&
+      getProviderOptionCurrentLabel(reasoning, modelSelection, traits.reportedModelSelection) ? (
+      <GaugeIcon aria-hidden="true" data-composer-control-icon className="size-3" />
+    ) : null;
+  const fast = display.speedLabel === "Fast" || display.speedLabel === "Ultrafast";
+  const contextWindow =
+    visibility.contextWindowDescriptor &&
+    getProviderOptionCurrentLabel(
+      visibility.contextWindowDescriptor,
+      modelSelection,
+      traits.reportedModelSelection,
+    );
+  if (!reasoningIcon && !fast && !display.ultracode && !contextWindow) {
+    return { suffix: null, detail: display.label };
+  }
+  return {
+    detail: display.label,
+    suffix: (
+      <span className="flex shrink-0 items-center gap-1 text-current/90 group-hover/model-trigger:text-current">
+        {reasoningIcon}
+        {fast ? <FastBolt ultra={display.speedLabel === "Ultrafast"} /> : null}
+        {display.ultracode ? (
+          <WorkflowIcon aria-hidden="true" data-composer-control-icon className="size-3" />
+        ) : null}
+        {contextWindow ? (
+          <LayersIcon aria-hidden="true" data-composer-control-icon className="size-3" />
         ) : null}
       </span>
     ),

@@ -3707,7 +3707,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <ComposerPinnedModelsRow
                 environmentId={environmentId}
                 planModeEnabled={settings.planModeEnabled}
-                effortDisplay={settings.effortDisplay}
                 showProviderUnavailable={showProviderUnavailable}
                 providerCatalogPending={providerCatalogPending}
                 isSendBusy={isSendBusy}
@@ -3749,7 +3748,50 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     "hidden sm:flex",
                 )}
               >
-                {composerAttachButton ? <div className="me-2">{composerAttachButton}</div> : null}
+                {composerAttachButton || speechInput.available ? (
+                  <div className="me-2 flex shrink-0 items-center gap-0.5">
+                    {composerAttachButton}
+                    {speechInput.available ? (
+                      <>
+                        <ComposerSpeechRecordingPill
+                          state={speechInput.state}
+                          progress={null}
+                          finishShortcutLabel={dictationShortcutLabel}
+                          cancelShortcutLabel="Esc"
+                          level={speechInput.level}
+                          disabled={dictationDisabled}
+                          onStart={() => void speechInput.start()}
+                          onStop={() => void speechInput.stop()}
+                          onCancel={() => speechInput.cancel()}
+                          onSkipPostProcessing={() => speechInput.skipPostProcessing()}
+                        />
+                        <ComposerSpeechButton
+                          state={speechInput.state}
+                          progress={null}
+                          shortcutLabel={dictationShortcutLabel}
+                          disabled={dictationDisabled}
+                          onStart={() => void speechInput.start()}
+                          onCancel={() => speechInput.cancel()}
+                        />
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+                <VoiceInputSetup
+                  environmentId={speechInput.transcriptionEnvironmentId}
+                  open={speechInput.setup.open}
+                  step={speechInput.setup.step}
+                  status={speechInput.status}
+                  model={speechInput.setup.model}
+                  language={speechInput.setup.language}
+                  downloading={speechInput.setup.downloading}
+                  error={speechInput.setup.error}
+                  onOpenChange={speechInput.setup.setOpen}
+                  onRetryCatalog={speechInput.setup.retryCatalog}
+                  onDownload={() => void speechInput.setup.download()}
+                  onCancelDownload={() => void speechInput.setup.cancelDownload()}
+                  onStartRecording={() => void speechInput.setup.startRecording()}
+                />
                 <div
                   data-chat-composer-actions="right"
                   data-chat-composer-transition-actions="true"
@@ -3824,47 +3866,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     {...(compactCommandAvailable
                       ? { onCompactContext: compactThreadContextStable }
                       : {})}
-                  >
-                    {speechInput.available ? (
-                      <>
-                        <ComposerSpeechRecordingPill
-                          state={speechInput.state}
-                          progress={null}
-                          finishShortcutLabel={dictationShortcutLabel}
-                          cancelShortcutLabel="Esc"
-                          level={speechInput.level}
-                          disabled={dictationDisabled}
-                          onStart={() => void speechInput.start()}
-                          onStop={() => void speechInput.stop()}
-                          onCancel={() => speechInput.cancel()}
-                          onSkipPostProcessing={() => speechInput.skipPostProcessing()}
-                        />
-                        <ComposerSpeechButton
-                          state={speechInput.state}
-                          progress={null}
-                          shortcutLabel={dictationShortcutLabel}
-                          disabled={dictationDisabled}
-                          onStart={() => void speechInput.start()}
-                          onCancel={() => speechInput.cancel()}
-                        />
-                      </>
-                    ) : null}
-                    <VoiceInputSetup
-                      environmentId={speechInput.transcriptionEnvironmentId}
-                      open={speechInput.setup.open}
-                      step={speechInput.setup.step}
-                      status={speechInput.status}
-                      model={speechInput.setup.model}
-                      language={speechInput.setup.language}
-                      downloading={speechInput.setup.downloading}
-                      error={speechInput.setup.error}
-                      onOpenChange={speechInput.setup.setOpen}
-                      onRetryCatalog={speechInput.setup.retryCatalog}
-                      onDownload={() => void speechInput.setup.download()}
-                      onCancelDownload={() => void speechInput.setup.cancelDownload()}
-                      onStartRecording={() => void speechInput.setup.startRecording()}
-                    />
-                  </ComposerFooterPrimaryActions>
+                  />
                 </div>
               </div>
             )}

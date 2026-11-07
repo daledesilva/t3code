@@ -8,6 +8,7 @@ import { Badge } from "../ui/badge";
 import { Kbd } from "../ui/kbd";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
+import { FastBolt } from "./EffortGlyph";
 import { modelPickerModelKey } from "./modelPickerKeys";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 
@@ -80,10 +81,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
           {/* The logo is decorative, so name the provider for screen readers. */}
           <span className="sr-only">, {props.providerDisplayName}</span>
         </div>
-        {props.speedLabel ? (
-          <Badge variant="outline" size="sm" className="shrink-0">
-            {props.speedLabel}
-          </Badge>
+        {props.speedLabel === "Fast" || props.speedLabel === "Ultrafast" ? (
+          <FastBolt ultra={props.speedLabel === "Ultrafast"} />
         ) : null}
         {props.isSelected ? <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" /> : null}
         {props.subProvider ? (

@@ -78,9 +78,10 @@ export function PaceIcon({ pace }: { readonly pace: LimitPace }) {
 // The tick sits in a transparent gap cut from the bar, clamped so it stays inside at 0% and 100%.
 // The gap is a clip-path slot rather than a mask: a mask composites its layer and re-antialiases
 // the bar's rounded ends, and the polygon reaches 1px past the box so only the slot edges clip.
+// Fills hug the right edge and deplete from the left, so even pace sits timeLeft% in from the right.
 function paceMarkStyles(timeLeft: number | null) {
   if (timeLeft === null) return null;
-  const at = `clamp(3px, ${timeLeft}%, calc(100% - 3px))`;
+  const at = `clamp(3px, ${100 - timeLeft}%, calc(100% - 3px))`;
   const [left, right] = [`calc(${at} - 3px)`, `calc(${at} + 3px)`];
   const [near, far] = ["-1px", "calc(100% + 1px)"];
   return {
@@ -152,7 +153,7 @@ function WindowBar({
           <div className="absolute inset-x-0 inset-y-1.5 rounded-full bg-muted" />
           {remaining > 0 ? (
             <div
-              className="absolute inset-y-1.5 left-0 rounded-full"
+              className="absolute inset-y-1.5 right-0 rounded-full"
               style={{ width: `${remaining}%`, backgroundColor: color }}
             />
           ) : null}

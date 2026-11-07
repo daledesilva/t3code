@@ -369,13 +369,15 @@ function SegmentTriggers({
           <div className="absolute inset-0" style={paceMark?.gap}>
             <div
               aria-hidden
-              className="absolute inset-y-0 left-0 rounded-md opacity-35"
+              data-slot="usage-fill"
+              className="absolute inset-y-0 right-0 rounded-md opacity-35"
               style={{ width: `${remaining}%`, backgroundColor: color }}
             />
             {remaining < 100 && reset && refillPercent > 0 ? (
               <div
                 aria-hidden
-                className="absolute inset-y-0 right-0 opacity-20"
+                data-slot="usage-restore"
+                className="absolute inset-y-0 left-0 opacity-20"
                 style={{
                   width: `${Math.min(100 - remaining, refillPercent)}%`,
                   backgroundImage: `repeating-linear-gradient(135deg, ${color} 0 1px, transparent 1px 5px)`,
@@ -387,6 +389,7 @@ function SegmentTriggers({
         {paceMark ? (
           <span
             aria-hidden
+            data-slot="usage-pace-mark"
             className="absolute inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full bg-foreground"
             style={paceMark.tick}
           />

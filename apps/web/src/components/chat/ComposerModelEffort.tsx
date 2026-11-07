@@ -150,6 +150,7 @@ export function describeComposerEffort(
   traits: TraitsSelectionInput | null,
   effortDisplay: EffortDisplay,
   size: ComposerControlSize,
+  tone: "default" | "action" = "default",
 ): { suffix: ReactNode; detail: string | null } {
   if (!traits) return { suffix: null, detail: null };
   const visibility = getTraitsSectionVisibility(traits);
@@ -215,13 +216,21 @@ export function describeComposerEffort(
     suffix: (
       <span
         className={cn(
-          "flex shrink-0 items-center gap-1.5 text-muted-foreground group-hover/model-trigger:text-foreground group-data-pressed/model-trigger:text-foreground group-data-popup-open/model-trigger:text-foreground",
+          "flex shrink-0 items-center gap-1.5",
+          tone === "action"
+            ? "text-current/90 group-hover/model-trigger:text-current"
+            : "text-muted-foreground group-hover/model-trigger:text-foreground group-data-pressed/model-trigger:text-foreground group-data-popup-open/model-trigger:text-foreground",
           // A word space after the model name: the regular trigger's gap is wider than one.
           size === "sm" && "-ms-0.5",
         )}
       >
         {speedMode ? (
-          <Badge variant="outline" size="sm" data-composer-control-label className="shrink-0">
+          <Badge
+            variant={tone === "action" ? "secondary" : "outline"}
+            size="sm"
+            data-composer-control-label
+            className="shrink-0"
+          >
             {speedMode.label}
           </Badge>
         ) : null}

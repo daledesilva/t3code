@@ -85,9 +85,6 @@ export function measureRestingComposerControls(
   const leadingControl =
     picker ?? controls.querySelector<HTMLElement>('[data-chat-provider-unavailable="true"]');
   if (!leadingControl) return null;
-  const pinsContainer = controls.querySelector<HTMLElement>("[data-chat-model-pins]");
-  const pinsWidth = pinsContainer ? elementOuterWidth(pinsContainer) : 0;
-  const pinsAndGapWidth = pinsWidth > 0 ? pinsWidth + gap : 0;
   const separator = controls.querySelector<HTMLElement>("[data-resting-controls-separator]");
   const separatorWidth = separator ? elementOuterWidth(separator) : 0;
   const overflow = controls.querySelector<HTMLElement>("[data-resting-controls-overflow]");
@@ -99,15 +96,11 @@ export function measureRestingComposerControls(
     naturalFixedWidth:
       (picker
         ? providerModelPickerNaturalWidth(picker) + pinTriggerWidth
-        : elementOuterWidth(leadingControl)) +
-      pinsAndGapWidth +
-      separatorAndGapWidth,
+        : elementOuterWidth(leadingControl)) + separatorAndGapWidth,
     minimumFixedWidth:
       (picker
         ? providerModelPickerMinimumWidth(picker) + pinTriggerWidth
-        : elementOuterWidth(leadingControl)) +
-      pinsAndGapWidth +
-      separatorAndGapWidth,
+        : elementOuterWidth(leadingControl)) + separatorAndGapWidth,
     blockWidths: widths.map((width) => width.natural),
     iconOnlyBlockWidths: widths.map((width) => width.iconOnly),
     overflowWidth: overflow ? elementOuterWidth(overflow) : 0,

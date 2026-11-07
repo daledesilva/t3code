@@ -213,7 +213,11 @@ import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { buildPullRequestReferenceContext } from "../pullRequest/pullRequestDetail.logic";
-import { getComposerPromptInjectionState, getComposerReasoningStep } from "./composerProviderState";
+import {
+  getComposerPromptInjectionState,
+  getComposerProviderState,
+  getComposerReasoningStep,
+} from "./composerProviderState";
 import { readPromptUltrathink } from "./TraitsPicker";
 import {
   providerSupportsManualCompaction,
@@ -244,7 +248,7 @@ import { useManagedPolicy } from "../../state/managedPolicy";
 import { proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
 import { hasProviderSetup } from "./ProviderStatusBanner";
 import { type AppModelOption, getAppModelOptionsForInstance } from "../../modelSelection";
-import type { UnifiedSettings } from "@t3tools/contracts/settings";
+import type { ModelPin, UnifiedSettings } from "@t3tools/contracts/settings";
 import { isVideoAttachment, type SessionPhase, type Thread, type ThreadShell } from "../../types";
 import { type ComposerPromptHistoryPosition } from "./composerPromptHistory";
 import type { PendingUserInputDraftAnswer } from "@t3tools/client-runtime/state/pending-user-input";
@@ -282,8 +286,17 @@ import {
   countPreparingComposerImages,
   usePreparingComposerImages,
 } from "./preparingComposerImages";
-import { ComposerControlsBar } from "./ComposerControlsBar";
+import { ComposerControlsBar, ComposerPinnedModelsRow } from "./ComposerControlsBar";
 import { composerCommandKeyHandler } from "./composerCommandKey";
+
+type ComposerSendModelOverride = {
+  selectedModelSelection: ModelSelection;
+  selectedProvider: ProviderDriverKind;
+  selectedModel: string;
+  selectedProviderModels: ServerProvider["models"];
+  selectedPromptEffort: string | null;
+  providerAvailable: boolean;
+};
 
 function consumePasteAsTextShortcut(deadline: { current: number }): boolean {
   const armed = Date.now() <= deadline.current;
@@ -2136,22 +2149,41 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return showPlanFollowUpPrompt || composerSendState.hasSendableContent;
   };
 
+  const pendingSendModelOverrideRef = useRef<ComposerSendModelOverride | null>(null);
   const submitComposerRef = useRef<
-    (dispatchMode?: ComposerDispatchMode, submissionIntent?: ComposerSubmissionIntent) => void
+    (
+      dispatchMode?: ComposerDispatchMode,
+      submissionIntent?: ComposerSubmissionIntent,
+      modelOverride?: ComposerSendModelOverride,
+    ) => void
   >(() => {});
   const submitComposer = (
     event?: { preventDefault: () => void },
     dispatchMode?: ComposerDispatchMode,
     submissionIntent?: ComposerSubmissionIntent,
+    modelOverride?: ComposerSendModelOverride,
   ) => {
     if (voiceInputActive) {
       event?.preventDefault();
-      submitAfterDictation(() => submitComposerRef.current(dispatchMode, submissionIntent));
+      submitAfterDictation(() =>
+        submitComposerRef.current(dispatchMode, submissionIntent, modelOverride),
+      );
       return;
     }
+    const effectiveNoProviderAvailable = modelOverride
+      ? !modelOverride.providerAvailable
+      : noProviderAvailable;
+    const effectiveIsSendDisabled = modelOverride
+      ? externalSendDisabledReason !== null ||
+        (activePendingProgress
+          ? attachmentBlockReason !== null
+          : attachmentBlockReason !== null ||
+            runtimeModeCeilingDenial !== undefined ||
+            !modelOverride.providerAvailable)
+      : isSendDisabled;
     if (
-      noProviderAvailable ||
-      isSendDisabled ||
+      effectiveNoProviderAvailable ||
+      effectiveIsSendDisabled ||
       !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)
     ) {
       event?.preventDefault();
@@ -2178,6 +2210,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
       return;
     }
+    if (modelOverride && !noProviderAvailable && selectedInstanceId && selectedModel) {
+      // Preserve the model picker's current selection on the draft and thread target so the server
+      // turn updating `serverThread.modelSelection` to the pinned model does not switch the picker.
+      const draftStore = useComposerDraftStore.getState();
+      draftStore.setModelSelection(composerDraftTarget, selectedModelSelection, {
+        explicit: true,
+        replaceOptions: true,
+      });
+      if (routeThreadRef) {
+        draftStore.setModelSelection(routeThreadRef, selectedModelSelection, {
+          explicit: true,
+          replaceOptions: true,
+        });
+      }
+    }
+    pendingSendModelOverrideRef.current = modelOverride ?? null;
     const submission = submitComposerDraft({
       prompt: promptRef.current,
       submissionTarget: activePendingProgress ? "pending-user-input" : "provider-turn",
@@ -2198,6 +2246,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return !providerInputRejectedRef.current;
       },
     });
+    pendingSendModelOverrideRef.current = null;
     setComposerSubmissionError(submission.validationMessage);
     if (!submission.didDispatch) return;
     onTypingGuardSend();
@@ -2208,7 +2257,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const submitComposerStable = useStableCallback(submitComposer);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- publishes the committed submission handler to the asynchronous dictation completion
   useLayoutEffect(() => {
-    submitComposerRef.current = (mode, intent) => submitComposerStable(undefined, mode, intent);
+    submitComposerRef.current = (mode, intent, override) =>
+      submitComposerStable(undefined, mode, intent, override);
   }, [submitComposerStable]);
   useDictationSubmissionShortcut({
     enabled: voiceInputActive && !speechInput.preparing,
@@ -2251,6 +2301,55 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     );
   };
   const handleSubmitMessageStable = useStableCallback(handleSubmitMessage);
+  const handleSubmitWithPinnedModel = (
+    pin: ModelPin,
+    resolvedSlug: string,
+    event: React.MouseEvent<HTMLButtonElement>,
+  ) => {
+    event.preventDefault();
+    const entry = providerInstanceEntries.find(
+      (candidate) => candidate.instanceId === pin.provider,
+    );
+    if (!entry) return;
+    const pinProviderState = getComposerProviderState({
+      provider: entry.driverKind,
+      model: resolvedSlug,
+      models: entry.snapshot.models,
+      promptInjectionState: getComposerPromptInjectionState(promptRef.current),
+      modelOptions: pin.options,
+      planModeEnabled: settings.planModeEnabled,
+    });
+    const pinSendBlockReason = getAntigravitySendBlockReason(entry.snapshot, resolvedSlug);
+    const pinDisabledReason = getModelDisabledReason(pin.provider, resolvedSlug);
+    const override: ComposerSendModelOverride = {
+      selectedModelSelection: createModelSelection(
+        pin.provider,
+        resolvedSlug,
+        pinProviderState.modelOptionsForDispatch,
+      ),
+      selectedProvider: entry.driverKind,
+      selectedModel: resolvedSlug,
+      selectedProviderModels: entry.snapshot.models,
+      selectedPromptEffort: pinProviderState.promptEffort,
+      providerAvailable:
+        entry.enabled &&
+        entry.isAvailable &&
+        pinSendBlockReason === null &&
+        pinDisabledReason === null,
+    };
+    submitComposer(
+      event,
+      resolveComposerDispatchMode({
+        running: phase === "running",
+        alternateModifier: event.metaKey || event.ctrlKey,
+        activeTurnDefault: followUpBehavior,
+        canSteer: !isCompacting,
+      }),
+      undefined,
+      override,
+    );
+  };
+  const handleSubmitWithPinnedModelStable = useStableCallback(handleSubmitWithPinnedModel);
   const submitCitationAndSend = () => {
     submitComposer(
       undefined,
@@ -3097,39 +3196,48 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           composerEditorRef.current?.focusAt(nextCollapsedCursor);
         });
       },
-      getSendContext: () => ({
-        answeringPendingUserInput: activePendingProgress !== null,
-        shownPendingApprovalIds: pendingApprovals
-          .map((approval) => approval.requestId)
-          .filter((requestId) => !heldRequestIds.has(requestId)),
-        prompt: promptRef.current,
-        images: composerImagesRef.current,
-        files: composerFilesRef.current,
-        terminalContexts: composerTerminalContextsRef.current,
-        previewAnnotations: composerPreviewAnnotations,
-        reviewComments: composerReviewComments,
-        threadContexts: composerThreadContexts,
-        environmentContexts: composerEnvironmentContexts,
-        selectedPromptEffort,
-        selectedModelSelection,
-        multipleModelSelections:
-          routeKind === "draft" && multipleModelSelections !== null
-            ? multipleModelSelections.map((selection) =>
-                selection.instanceId === selectedModelSelection.instanceId &&
-                selection.model === selectedModelSelection.model
-                  ? selectedModelSelection
-                  : selection,
-              )
-            : null,
-        providerAvailable:
-          multipleModelSelections !== null ||
-          (!noProviderAvailable && providerSendBlockReason === null),
-        selectedProvider,
-        selectedModel,
-        selectedProviderModels,
-        interactionMode,
-        interactionModeEnabled: planModeUiEnabled,
-      }),
+      getSendContext: () => {
+        const override = pendingSendModelOverrideRef.current;
+        return {
+          answeringPendingUserInput: activePendingProgress !== null,
+          shownPendingApprovalIds: pendingApprovals
+            .map((approval) => approval.requestId)
+            .filter((requestId) => !heldRequestIds.has(requestId)),
+          prompt: promptRef.current,
+          images: composerImagesRef.current,
+          files: composerFilesRef.current,
+          terminalContexts: composerTerminalContextsRef.current,
+          previewAnnotations: composerPreviewAnnotations,
+          reviewComments: composerReviewComments,
+          threadContexts: composerThreadContexts,
+          environmentContexts: composerEnvironmentContexts,
+          selectedPromptEffort: override ? override.selectedPromptEffort : selectedPromptEffort,
+          selectedModelSelection: override
+            ? override.selectedModelSelection
+            : selectedModelSelection,
+          multipleModelSelections: override
+            ? null
+            : routeKind === "draft" && multipleModelSelections !== null
+              ? multipleModelSelections.map((selection) =>
+                  selection.instanceId === selectedModelSelection.instanceId &&
+                  selection.model === selectedModelSelection.model
+                    ? selectedModelSelection
+                    : selection,
+                )
+              : null,
+          providerAvailable: override
+            ? override.providerAvailable
+            : multipleModelSelections !== null ||
+              (!noProviderAvailable && providerSendBlockReason === null),
+          selectedProvider: override ? override.selectedProvider : selectedProvider,
+          selectedModel: override ? override.selectedModel : selectedModel,
+          selectedProviderModels: override
+            ? override.selectedProviderModels
+            : selectedProviderModels,
+          interactionMode,
+          interactionModeEnabled: planModeUiEnabled,
+        };
+      },
       setMultipleModelSelections,
       validateProviderInput: (providerInput: string) => {
         const validationMessage = getComposerSubmissionValidationMessage({
@@ -3594,6 +3702,41 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 <span className="text-muted-foreground">{speechInput.preview.tentative}</span>
               </div>
             ) : null}
+
+            {isComposerCollapsedMobile && speechInput.state.phase === "idle" ? null : (
+              <ComposerPinnedModelsRow
+                environmentId={environmentId}
+                planModeEnabled={settings.planModeEnabled}
+                effortDisplay={settings.effortDisplay}
+                showProviderUnavailable={showProviderUnavailable}
+                providerCatalogPending={providerCatalogPending}
+                isSendBusy={isSendBusy}
+                canSubmit={
+                  canOperateThread &&
+                  environmentUnavailable === null &&
+                  !projectSelectionRequired &&
+                  !isSendBusy &&
+                  activePendingProgress === null &&
+                  attachmentBlockReason === null &&
+                  runtimeModeCeilingDenial === undefined &&
+                  externalSendDisabledReason === null &&
+                  !speechInput.preparing &&
+                  (composerSendState.hasSendableContent ||
+                    voiceInputActive ||
+                    (pendingUserInputs.length === 0 && showPlanFollowUpPrompt))
+                }
+                providerInstanceEntries={providerInstanceEntries}
+                modelOptionsByInstance={modelOptionsByInstance}
+                getModelDisabledReason={getModelDisabledReason}
+                onSubmitWithPin={handleSubmitWithPinnedModelStable}
+                className={cn(
+                  pendingUserInputs.length > 0 && "pt-2",
+                  showMobilePendingAnswerActions &&
+                    speechInput.state.phase === "idle" &&
+                    "hidden sm:flex",
+                )}
+              />
+            )}
 
             {isComposerCollapsedMobile && speechInput.state.phase === "idle" ? null : (
               <div

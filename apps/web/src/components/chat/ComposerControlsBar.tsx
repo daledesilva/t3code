@@ -29,11 +29,11 @@ import {
 import type { EffortDisplay, ModelPin } from "@t3tools/contracts/settings";
 import {
   buildExplicitProviderOptionSelectionsFromDescriptors,
-  getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
 import { modelPinsEqual } from "@t3tools/shared/serverSettings";
 import {
+  useEnvironmentIdentificationMode,
   useEnvironmentModelPreferences,
   useRenameEnvironmentModelPin,
   useToggleEnvironmentModelPin,
@@ -41,6 +41,7 @@ import {
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "../../localApi";
 import { getProviderModelCapabilities } from "../../providerModels";
+import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
 import { resolveComposerTraitsInput, withImplicitFastModeDefault } from "./composerProviderState";
 import {
   ComposerEffortColumn,
@@ -104,6 +105,279 @@ function PinnedModelRenameInput(props: {
       onDoubleClick={(event) => event.stopPropagation()}
       className="w-28 min-w-0 rounded-sm bg-background px-1 text-foreground outline-none ring-1 ring-inset ring-ring"
     />
+  );
+}
+
+const PINNED_MODEL_SUBMIT_PILL =
+  "group/model-trigger relative isolate inline-flex h-7 shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-full px-2.5 font-medium text-base whitespace-nowrap shadow-xs transition-all duration-150 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:text-sm";
+
+export function ComposerPinnedModelsRow(props: {
+  environmentId: EnvironmentId;
+  planModeEnabled: boolean;
+  effortDisplay: EffortDisplay;
+  showProviderUnavailable: boolean;
+  providerCatalogPending: boolean;
+  isSendBusy: boolean;
+  canSubmit: boolean;
+  providerInstanceEntries: ReadonlyArray<ProviderInstanceEntry>;
+  modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<AppModelOption>>;
+  getModelDisabledReason: ChatComposerProps["getModelDisabledReason"];
+  onSubmitWithPin: (
+    pin: ModelPin,
+    resolvedSlug: string,
+    event: ReactMouseEvent<HTMLButtonElement>,
+  ) => void;
+  className?: string;
+}) {
+  const {
+    environmentId,
+    planModeEnabled,
+    effortDisplay,
+    showProviderUnavailable,
+    providerCatalogPending,
+    isSendBusy,
+    canSubmit,
+    providerInstanceEntries,
+    modelOptionsByInstance,
+    getModelDisabledReason,
+    onSubmitWithPin,
+  } = props;
+  const { pins } = useEnvironmentModelPreferences(environmentId);
+  const togglePin = useToggleEnvironmentModelPin(environmentId);
+  const renamePin = useRenameEnvironmentModelPin(environmentId);
+  const [renamingPinKey, setRenamingPinKey] = useState<string | null>(null);
+  const environmentIdentificationMode = useEnvironmentIdentificationMode();
+  const stageBackdropVariant = useSidebarStageBackdropVariant(environmentIdentificationMode);
+
+  if (showProviderUnavailable || pins.length === 0) {
+    return null;
+  }
+
+  const openPinContextMenu = (
+    pin: ModelPin,
+    pinKey: string,
+    position: { x: number; y: number },
+  ) => {
+    void (async () => {
+      const api = readLocalApi();
+      if (!api) return;
+      const action = await api.contextMenu.show(PINNED_MODEL_CONTEXT_MENU_ITEMS, position);
+      if (action === "rename") {
+        setRenamingPinKey(pinKey);
+      } else if (action === "unpin") {
+        void togglePin(pin.provider, pin.model, pin.options);
+      }
+    })();
+  };
+
+  const pinnedModelButtons = pins.flatMap((pin) => {
+    const entry = providerInstanceEntries.find(
+      (candidate) => candidate.instanceId === pin.provider,
+    );
+    if (!entry) return [];
+    const instanceOptions = modelOptionsByInstance.get(pin.provider) ?? [];
+    const resolvedModelOption = resolveModelPickerSelectedModel({
+      driverKind: entry.driverKind,
+      model: pin.model,
+      options: instanceOptions,
+    });
+    const resolvedSlug = resolvedModelOption?.slug ?? pin.model;
+    const disabledReason = getModelDisabledReason(pin.provider, resolvedSlug);
+    const pinCaps = getProviderModelCapabilities(
+      entry.snapshot.models,
+      resolvedSlug,
+      entry.driverKind,
+      planModeEnabled,
+    );
+    const pinSelections = withImplicitFastModeDefault(pinCaps, pin.options);
+    const pinTraitsInput = {
+      provider: entry.driverKind,
+      instanceId: pin.provider,
+      model: resolvedSlug,
+      models: entry.snapshot.models,
+      modelOptions: pinSelections,
+      promptUltrathink: "none" as const,
+      planModeEnabled,
+      onModelOptionsChange: () => {},
+    };
+    const pinEffort = describeComposerEffort(pinTraitsInput, effortDisplay, "sm", "action");
+    const defaultTriggerTitle = resolvedModelOption
+      ? getTriggerDisplayModelName(resolvedModelOption, entry.driverKind)
+      : pin.model;
+    const triggerTitle = pin.label ?? defaultTriggerTitle;
+    const triggerLabel = resolvedModelOption
+      ? getDisplayModelName(resolvedModelOption)
+      : defaultTriggerTitle;
+    const showInstanceBadge = shouldShowInstanceBadge(entry, providerInstanceEntries);
+    const pinKey = `${pin.provider}:${pin.model}:${JSON.stringify(pin.options ?? [])}`;
+    const isRenaming = renamingPinKey === pinKey;
+    const tooltipText = [
+      `Submit with ${pin.label ? `${pin.label} (${triggerLabel})` : triggerLabel}`,
+      pinEffort.detail,
+      disabledReason,
+    ]
+      .filter(Boolean)
+      .join(" \u00b7 ");
+    const handleContextMenu = (event: ReactMouseEvent<HTMLElement>) => {
+      if (event.defaultPrevented) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const bounds = event.currentTarget.getBoundingClientRect();
+      openPinContextMenu(
+        pin,
+        pinKey,
+        event.clientX === 0 && event.clientY === 0
+          ? { x: bounds.left, y: bounds.bottom }
+          : { x: event.clientX, y: event.clientY },
+      );
+    };
+    const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+      if (
+        event.defaultPrevented ||
+        isRenaming ||
+        !(event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const bounds = event.currentTarget.getBoundingClientRect();
+      openPinContextMenu(pin, pinKey, { x: bounds.left, y: bounds.bottom });
+    };
+    const iconElement = (
+      <span data-chat-provider-model-picker-icon className="contents">
+        <ProviderInstanceIcon
+          driverKind={entry.driverKind}
+          displayName={entry.displayName}
+          accentColor={entry.accentColor}
+          acpRegistryAgentId={entry.acpRegistryAgentId}
+          acpRegistryIconUrl={entry.acpRegistryIconUrl}
+          showBadge={showInstanceBadge}
+          className="size-4"
+          iconClassName="size-4"
+          indicatorBackground="var(--message-action)"
+          badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs"
+        />
+      </span>
+    );
+    const upArrowIcon = (
+      <svg
+        width="12"
+        height="12"
+        viewBox="0 0 14 14"
+        fill="none"
+        aria-hidden="true"
+        className="ms-0.5 size-3.5 shrink-0 pointer-events-none"
+      >
+        <path
+          d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+    const backdropArt = stageBackdropVariant ? (
+      <span className="pointer-events-none absolute inset-0 -z-10" aria-hidden="true">
+        <StageBackdropButtonArt variant={stageBackdropVariant} />
+      </span>
+    ) : null;
+    const toneClassName = stageBackdropVariant
+      ? "bg-transparent text-white"
+      : "bg-message-action text-message-action-foreground";
+    if (isRenaming) {
+      return [
+        <div
+          key={pinKey}
+          data-chat-model-pin="true"
+          className={cn(PINNED_MODEL_SUBMIT_PILL, toneClassName)}
+        >
+          {backdropArt}
+          {iconElement}
+          <PinnedModelRenameInput
+            initialValue={pin.label ?? defaultTriggerTitle}
+            placeholder={defaultTriggerTitle}
+            onCommit={(nextValue) => {
+              setRenamingPinKey(null);
+              const trimmed = nextValue.trim();
+              const nextLabel =
+                trimmed.length === 0 || trimmed === defaultTriggerTitle ? null : trimmed;
+              if ((nextLabel ?? undefined) === pin.label) return;
+              void renamePin(pin.provider, pin.model, pin.options, nextLabel);
+            }}
+            onCancel={() => setRenamingPinKey(null)}
+          />
+          {pinEffort.suffix}
+          {upArrowIcon}
+        </div>,
+      ];
+    }
+    const isHardDisabled = providerCatalogPending || isSendBusy || Boolean(disabledReason);
+    const isActionReady = !isHardDisabled && canSubmit;
+    const button = (
+      <button
+        key={pinKey}
+        type="button"
+        aria-disabled={!isActionReady || undefined}
+        aria-label={`Submit with ${[triggerTitle, pinEffort.detail].filter(Boolean).join(", ")}`}
+        data-chat-model-pin="true"
+        disabled={isHardDisabled}
+        onClick={(event) => {
+          if (!isActionReady) {
+            event.preventDefault();
+            return;
+          }
+          onSubmitWithPin(pin, resolvedSlug, event);
+        }}
+        onContextMenu={handleContextMenu}
+        onKeyDown={handleKeyDown}
+        className={cn(
+          PINNED_MODEL_SUBMIT_PILL,
+          toneClassName,
+          isActionReady
+            ? cn(
+                "cursor-pointer inset-shadow-control-highlight hover:scale-[1.02] active:inset-shadow-control-pressed active:shadow-none",
+                stageBackdropVariant
+                  ? "shadow-black/24 hover:brightness-110"
+                  : "shadow-message-action/24 hover:bg-message-action-hover",
+              )
+            : "cursor-default opacity-64 shadow-none",
+          "disabled:cursor-not-allowed disabled:opacity-64 disabled:shadow-none",
+        )}
+      >
+        {backdropArt}
+        <span className="flex min-w-0 items-center gap-1.5">
+          {iconElement}
+          <span className="max-w-40 min-w-0 truncate">{triggerTitle}</span>
+          {pinEffort.suffix}
+          {upArrowIcon}
+        </span>
+      </button>
+    );
+    if (!tooltipText) return [button];
+    return [
+      <Tooltip key={pinKey}>
+        <TooltipTrigger render={button} />
+        <TooltipPopup side="top">{tooltipText}</TooltipPopup>
+      </Tooltip>,
+    ];
+  });
+
+  if (pinnedModelButtons.length === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      data-chat-model-pins="true"
+      className={cn(
+        "flex min-w-0 flex-wrap items-center justify-center gap-1.5 px-3 pb-1.5",
+        props.className,
+      )}
+    >
+      {pinnedModelButtons}
+    </div>
   );
 }
 
@@ -217,8 +491,6 @@ export function ComposerControlsBar(props: {
   } = props;
   const { pins } = useEnvironmentModelPreferences(environmentId);
   const togglePin = useToggleEnvironmentModelPin(environmentId);
-  const renamePin = useRenameEnvironmentModelPin(environmentId);
-  const [renamingPinKey, setRenamingPinKey] = useState<string | null>(null);
   const accessMatchesDefault = compatibleRuntimeMode === defaultRuntimeMode;
   const {
     accessDisplay,
@@ -281,203 +553,6 @@ export function ComposerControlsBar(props: {
       : null;
   const isCurrentModelPinned =
     currentPinCandidate !== null && pins.some((pin) => modelPinsEqual(pin, currentPinCandidate));
-
-  const openPinContextMenu = (
-    pin: ModelPin,
-    pinKey: string,
-    position: { x: number; y: number },
-  ) => {
-    void (async () => {
-      const api = readLocalApi();
-      if (!api) return;
-      const action = await api.contextMenu.show(PINNED_MODEL_CONTEXT_MENU_ITEMS, position);
-      if (action === "rename") {
-        setRenamingPinKey(pinKey);
-      } else if (action === "unpin") {
-        void togglePin(pin.provider, pin.model, pin.options);
-      }
-    })();
-  };
-
-  const pinnedModelButtons = pins.flatMap((pin) => {
-    const entry = providerInstanceEntries.find(
-      (candidate) => candidate.instanceId === pin.provider,
-    );
-    if (!entry) return [];
-    const instanceOptions = modelOptionsByInstance.get(pin.provider) ?? [];
-    const resolvedModelOption = resolveModelPickerSelectedModel({
-      driverKind: entry.driverKind,
-      model: pin.model,
-      options: instanceOptions,
-    });
-    const resolvedSlug = resolvedModelOption?.slug ?? pin.model;
-    const disabledReason = getModelDisabledReason(pin.provider, resolvedSlug);
-    const pinCaps = getProviderModelCapabilities(
-      entry.snapshot.models,
-      resolvedSlug,
-      entry.driverKind,
-      planModeEnabled,
-    );
-    const pinSelections = withImplicitFastModeDefault(pinCaps, pin.options);
-    const pinTraitsInput = {
-      provider: entry.driverKind,
-      instanceId: pin.provider,
-      model: resolvedSlug,
-      models: entry.snapshot.models,
-      modelOptions: pinSelections,
-      promptUltrathink: "none" as const,
-      planModeEnabled,
-      onModelOptionsChange: () => {},
-    };
-    const pinEffort = describeComposerEffort(pinTraitsInput, props.effortDisplay, controlSize);
-    const defaultTriggerTitle = resolvedModelOption
-      ? getTriggerDisplayModelName(resolvedModelOption, entry.driverKind)
-      : pin.model;
-    const triggerTitle = pin.label ?? defaultTriggerTitle;
-    const triggerLabel = resolvedModelOption
-      ? getDisplayModelName(resolvedModelOption)
-      : defaultTriggerTitle;
-    const showInstanceBadge = shouldShowInstanceBadge(entry, providerInstanceEntries);
-    const isPinSelected =
-      multipleModelSelections === null &&
-      selectedInstanceId === pin.provider &&
-      selectedModel === resolvedSlug &&
-      (pin.options ?? []).every((pinnedOpt) => {
-        const descriptor = activeDescriptors.find((desc) => desc.id === pinnedOpt.id);
-        if (descriptor) {
-          return getProviderOptionCurrentValue(descriptor) === pinnedOpt.value;
-        }
-        return traitsInput?.modelOptions?.some(
-          (activeOpt) => activeOpt.id === pinnedOpt.id && activeOpt.value === pinnedOpt.value,
-        );
-      });
-    const pinKey = `${pin.provider}:${pin.model}:${JSON.stringify(pin.options ?? [])}`;
-    const isRenaming = renamingPinKey === pinKey;
-    const tooltipText = [
-      pin.label ? `${pin.label} (${triggerLabel})` : triggerLabel,
-      pinEffort.detail,
-      disabledReason,
-    ]
-      .filter(Boolean)
-      .join(" \u00b7 ");
-    const handleContextMenu = (event: ReactMouseEvent<HTMLElement>) => {
-      if (event.defaultPrevented) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const bounds = event.currentTarget.getBoundingClientRect();
-      openPinContextMenu(
-        pin,
-        pinKey,
-        event.clientX === 0 && event.clientY === 0
-          ? { x: bounds.left, y: bounds.bottom }
-          : { x: event.clientX, y: event.clientY },
-      );
-    };
-    const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
-      if (
-        event.defaultPrevented ||
-        isRenaming ||
-        !(event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))
-      ) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      const bounds = event.currentTarget.getBoundingClientRect();
-      openPinContextMenu(pin, pinKey, { x: bounds.left, y: bounds.bottom });
-    };
-    const iconElement = (
-      <span data-chat-provider-model-picker-icon className="contents">
-        <ProviderInstanceIcon
-          driverKind={entry.driverKind}
-          displayName={entry.displayName}
-          accentColor={entry.accentColor}
-          acpRegistryAgentId={entry.acpRegistryAgentId}
-          acpRegistryIconUrl={entry.acpRegistryIconUrl}
-          showBadge={showInstanceBadge}
-          className="size-4"
-          iconClassName="size-4"
-          indicatorBackground={instanceIndicatorBackground}
-          badgeClassName={cn(
-            "right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs",
-            controlSize === "xs" && "shadow-none",
-          )}
-        />
-      </span>
-    );
-    if (isRenaming) {
-      return [
-        <div
-          key={pinKey}
-          data-chat-model-pin="true"
-          className={cn(
-            "inline-flex shrink-0 items-center whitespace-nowrap rounded-(--control-radius) bg-accent text-foreground",
-            controlSize === "xs"
-              ? "h-7 gap-1 px-1.75 text-xs sm:h-6"
-              : "h-7 gap-1.5 px-2 text-base sm:text-sm",
-          )}
-        >
-          {iconElement}
-          <PinnedModelRenameInput
-            initialValue={pin.label ?? defaultTriggerTitle}
-            placeholder={defaultTriggerTitle}
-            onCommit={(nextValue) => {
-              setRenamingPinKey(null);
-              const trimmed = nextValue.trim();
-              const nextLabel =
-                trimmed.length === 0 || trimmed === defaultTriggerTitle ? null : trimmed;
-              if ((nextLabel ?? undefined) === pin.label) return;
-              void renamePin(pin.provider, pin.model, pin.options, nextLabel);
-            }}
-            onCancel={() => setRenamingPinKey(null)}
-          />
-          {pinEffort.suffix}
-        </div>,
-      ];
-    }
-    const button = (
-      <ComposerControl
-        key={pinKey}
-        type="button"
-        size={controlSize}
-        aria-pressed={isPinSelected}
-        aria-label={[triggerTitle, pinEffort.detail].filter(Boolean).join(", ")}
-        data-chat-model-pin="true"
-        disabled={providerCatalogPending || isSendBusy || Boolean(disabledReason)}
-        onClick={() => {
-          onMultipleModelSelectionsChange(null);
-          onProviderModelSelect(pin.provider, resolvedSlug, {
-            modelOptions: pin.options ?? [],
-          });
-        }}
-        onContextMenu={handleContextMenu}
-        onKeyDown={handleKeyDown}
-        className={cn(
-          "group/model-trigger min-w-0 shrink-0 justify-between whitespace-nowrap",
-          PINNED_MODEL_STATES,
-          composerControlsCollapsed && "text-xs!",
-        )}
-      >
-        <span
-          className={cn(
-            "flex min-w-0 flex-1 items-center",
-            controlSize === "xs" ? "gap-1" : "gap-1.5",
-          )}
-        >
-          {iconElement}
-          <span className="max-w-40 min-w-0 truncate">{triggerTitle}</span>
-          {pinEffort.suffix}
-        </span>
-      </ComposerControl>
-    );
-    if (!tooltipText) return [button];
-    return [
-      <Tooltip key={pinKey}>
-        <TooltipTrigger render={button} />
-        <TooltipPopup side="top">{tooltipText}</TooltipPopup>
-      </Tooltip>,
-    ];
-  });
   const restingBlockDefs = showModeBlock
     ? [
         {
@@ -615,11 +690,6 @@ export function ComposerControlsBar(props: {
     </ComposerControl>
   ) : (
     <>
-      {pinnedModelButtons.length > 0 ? (
-        <div data-chat-model-pins="true" className="flex shrink-0 items-center gap-0.5">
-          {pinnedModelButtons}
-        </div>
-      ) : null}
       {composerModelPicker}
 
       <>

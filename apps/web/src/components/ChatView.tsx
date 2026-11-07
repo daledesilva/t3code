@@ -259,10 +259,21 @@ import {
   useThreadHistory,
   useQuietThreadShell,
   useThreadCheckpointSummaries,
+  useVisibleThreadShells,
 } from "../state/entities";
 import { useEnvironmentShellHasSnapshot } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
+import { FollowOnQueueSection } from "./chat/FollowOnQueue";
+import {
+  buildFollowOnQueueLists,
+  type FollowOnQueueServerUpdate,
+  isSidebarThreadEligibleForFollowOnQueue,
+  planFollowOnQueueReorder,
+  planSidebarDropIntoFollowOnQueue,
+  toFollowOnQueueItem,
+} from "./chat/followOnQueue.logic";
+import { useThreadContextDragGhost } from "./chat/threadContextDrag";
 import { ExpandedImageDialogHost, openExpandedImagePreview } from "./chat/ExpandedImageDialog";
 import {
   BranchRestoreConfirmHost,
@@ -3130,6 +3141,138 @@ export default function ChatView(props: ChatViewProps) {
     [childInputNow?.waitingLabel ?? null, queuedRunCount === 0 ? null : `${queuedRunCount} queued`]
       .filter((part) => part !== null)
       .join(" · ") || null;
+  const setThreadStartAfter = useOrchestrationCommand(threadEnvironment.setStartAfter, {
+    reportFailure: false,
+  });
+  const reorderThreadStartAfter = useOrchestrationCommand(threadEnvironment.reorderStartAfter, {
+    reportFailure: false,
+  });
+  const clearThreadStartAfter = useOrchestrationCommand(threadEnvironment.clearStartAfter, {
+    reportFailure: false,
+  });
+  const visibleThreadShells = useVisibleThreadShells();
+  const environmentThreads = visibleThreadShells.filter(
+    (candidate) => candidate.environmentId === environmentId,
+  );
+  const activeStartAfterThreadId = activeThread?.startAfterThreadId ?? null;
+  const { beforeQueue: followOnBeforeQueue, afterQueue: followOnAfterQueue } =
+    buildFollowOnQueueLists({
+      threads: environmentThreads,
+      priorThreadId: activeStartAfterThreadId,
+      currentThreadId: isServerThread ? activeThreadId : null,
+    });
+  const threadContextDragGhost = useThreadContextDragGhost();
+  const isDraggingWorkingSidebarThread =
+    isDraftHeroState &&
+    !isServerThread &&
+    (threadContextDragGhost?.threads?.some((ref) => {
+      if (ref.environmentId !== environmentId) return false;
+      const shell = environmentThreads.find((candidate) => candidate.id === ref.threadId);
+      return shell !== undefined && isSidebarThreadEligibleForFollowOnQueue(shell);
+    }) ??
+      false);
+  const applyFollowOnServerUpdates = async (updates: ReadonlyArray<FollowOnQueueServerUpdate>) => {
+    for (const update of updates) {
+      if (update.kind === "clear") {
+        await clearThreadStartAfter({
+          environmentId,
+          input: { threadId: update.threadId, createdAt: new Date().toISOString() },
+        });
+      } else if (update.kind === "reorder" && update.startAfterThreadId !== null) {
+        await reorderThreadStartAfter({
+          environmentId,
+          input: {
+            threadId: update.threadId,
+            startAfterThreadId: update.startAfterThreadId,
+            createdAt: new Date().toISOString(),
+          },
+        });
+      } else if (update.kind === "set" && update.startAfterThreadId !== null) {
+        await setThreadStartAfter({
+          environmentId,
+          input: {
+            threadId: update.threadId,
+            startAfterThreadId: update.startAfterThreadId,
+            createdAt: new Date().toISOString(),
+          },
+        });
+      }
+    }
+  };
+  const handleClearFollowOnQueue = () => {
+    if (!isServerThread) {
+      setDraftThreadContext(composerDraftTarget, { startAfterThreadId: null });
+      return;
+    }
+    if (activeThreadId !== null) {
+      void clearThreadStartAfter({
+        environmentId,
+        input: { threadId: activeThreadId, createdAt: new Date().toISOString() },
+      });
+    }
+  };
+  const handleClearFollowOnQueueStable = useStableCallback(handleClearFollowOnQueue);
+  const handleReorderFollowOnQueue = (input: {
+    readonly movedThreadId: ThreadId;
+    readonly targetList: "before" | "after";
+    readonly targetIndex: number;
+  }) => {
+    const plan = planFollowOnQueueReorder({
+      beforeQueue: followOnBeforeQueue,
+      afterQueue: followOnAfterQueue,
+      ...input,
+    });
+    if (!plan) return;
+    void applyFollowOnServerUpdates(plan.serverUpdates);
+    if (!isServerThread) {
+      setDraftThreadContext(composerDraftTarget, {
+        startAfterThreadId: plan.nextPriorThreadId,
+      });
+    } else if (
+      activeThreadId !== null &&
+      plan.nextPriorThreadId !== null &&
+      plan.nextPriorThreadId !== activeStartAfterThreadId
+    ) {
+      void reorderThreadStartAfter({
+        environmentId,
+        input: {
+          threadId: activeThreadId,
+          startAfterThreadId: plan.nextPriorThreadId,
+          createdAt: new Date().toISOString(),
+        },
+      });
+    }
+  };
+  const handleReorderFollowOnQueueStable = useStableCallback(handleReorderFollowOnQueue);
+  const handleDropSidebarThreadIntoQueue = (
+    refs: ReadonlyArray<ScopedThreadRef>,
+    insertIndex: number,
+  ) => {
+    if (isServerThread) return;
+    const droppedRef = refs.find((ref) => ref.environmentId === environmentId);
+    if (!droppedRef) return;
+    const droppedShell = environmentThreads.find(
+      (candidate) => candidate.id === droppedRef.threadId,
+    );
+    if (!droppedShell || !isSidebarThreadEligibleForFollowOnQueue(droppedShell)) return;
+    const plan = planSidebarDropIntoFollowOnQueue({
+      beforeQueue: followOnBeforeQueue,
+      afterQueue: followOnAfterQueue,
+      droppedThread: toFollowOnQueueItem(droppedShell),
+      insertIndex,
+    });
+    void applyFollowOnServerUpdates(plan.serverUpdates);
+    setDraftThreadContext(composerDraftTarget, {
+      startAfterThreadId: plan.nextPriorThreadId,
+    });
+  };
+  const handleDropSidebarThreadIntoQueueStable = useStableCallback(
+    handleDropSidebarThreadIntoQueue,
+  );
+  const hasServerFollowOnQueue =
+    isServerThread &&
+    activeStartAfterThreadId !== null &&
+    (followOnBeforeQueue.length > 0 || followOnAfterQueue.length > 0);
   // The end of the timeline holds the thread's present and next turns: what it is doing now,
   // its lifecycle status, guest messages awaiting you, then your queued messages.
   const timelineFooter =
@@ -3137,6 +3280,7 @@ export default function ChatView(props: ChatViewProps) {
     !hasThreadNow &&
     threadStatusLine === null &&
     pendingGuestMessageCount === 0 &&
+    !hasServerFollowOnQueue &&
     !hasQueuedTurns ? null : (
       <>
         {pendingHandoff === null ? null : (
@@ -3163,6 +3307,29 @@ export default function ChatView(props: ChatViewProps) {
             onImageExpand={onExpandTimelineImageStable}
             onFileOpen={openFileAttachmentStable}
           />
+        ) : null}
+        {hasServerFollowOnQueue ? (
+          <div className="chat-content-lane mb-2 flex flex-col gap-2">
+            <FollowOnQueueSection
+              section="before"
+              environmentId={environmentId}
+              beforeQueue={followOnBeforeQueue}
+              afterQueue={followOnAfterQueue}
+              canOperate={canOperateThread}
+              onClearQueue={handleClearFollowOnQueueStable}
+              onReorderQueue={handleReorderFollowOnQueueStable}
+            />
+            {followOnAfterQueue.length > 0 ? (
+              <FollowOnQueueSection
+                section="after"
+                environmentId={environmentId}
+                beforeQueue={followOnBeforeQueue}
+                afterQueue={followOnAfterQueue}
+                canOperate={canOperateThread}
+                onReorderQueue={handleReorderFollowOnQueueStable}
+              />
+            ) : null}
+          </div>
         ) : null}
         {hasQueuedTurns ? queuedRunsControl : null}
       </>
@@ -3559,6 +3726,21 @@ export default function ChatView(props: ChatViewProps) {
                             : undefined
                         }
                       >
+                        {followOnBeforeQueue.length > 0 || isDraggingWorkingSidebarThread ? (
+                          <div className="mb-4">
+                            <FollowOnQueueSection
+                              section="before"
+                              environmentId={environmentId}
+                              beforeQueue={followOnBeforeQueue}
+                              afterQueue={followOnAfterQueue}
+                              isSidebarDragging={isDraggingWorkingSidebarThread}
+                              canOperate={canOperateThread}
+                              onClearQueue={handleClearFollowOnQueueStable}
+                              onReorderQueue={handleReorderFollowOnQueueStable}
+                              onDropSidebarThread={handleDropSidebarThreadIntoQueueStable}
+                            />
+                          </div>
+                        ) : null}
                         <DraftHeroHeadline
                           draftId={draftId}
                           activeProjectRef={activeProjectRef}
@@ -3848,12 +4030,25 @@ export default function ChatView(props: ChatViewProps) {
                           </div>
                         </div>
                       </ComposerSurface.Shell>
-                      {isDraftHeroState && composerBannerItems.length > 0 ? (
+                      {isDraftHeroState &&
+                      (composerBannerItems.length > 0 || followOnAfterQueue.length > 0) ? (
                         // Out of flow, like the headline, so a notice never moves the centered composer.
                         // Short windows pin the composer to the bottom, where an out-of-flow notice
                         // would fall off-screen, so there it takes space and lifts the composer.
-                        <div className="absolute inset-x-0 top-full flex flex-col gap-1 pt-4 [@media(max-height:34rem)]:static">
-                          <ComposerBannerStack items={composerBannerItems} detached />
+                        <div className="absolute inset-x-0 top-full flex flex-col gap-3 pt-4 [@media(max-height:34rem)]:static">
+                          {followOnAfterQueue.length > 0 ? (
+                            <FollowOnQueueSection
+                              section="after"
+                              environmentId={environmentId}
+                              beforeQueue={followOnBeforeQueue}
+                              afterQueue={followOnAfterQueue}
+                              canOperate={canOperateThread}
+                              onReorderQueue={handleReorderFollowOnQueueStable}
+                            />
+                          ) : null}
+                          {composerBannerItems.length > 0 ? (
+                            <ComposerBannerStack items={composerBannerItems} detached />
+                          ) : null}
                         </div>
                       ) : null}
                     </div>

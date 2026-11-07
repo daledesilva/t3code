@@ -2239,6 +2239,9 @@ export const layerWsRpc = (
                     runtimeMode: input.runtimeMode,
                     interactionMode: input.interactionMode,
                     workspaceStrategy: input.workspaceStrategy,
+                    ...(input.startAfterThreadId === undefined
+                      ? {}
+                      : { startAfterThreadId: input.startAfterThreadId }),
                     ...(input.initialMessage === undefined
                       ? {}
                       : {

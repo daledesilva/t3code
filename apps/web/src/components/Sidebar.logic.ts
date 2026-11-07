@@ -668,6 +668,7 @@ type ThreadStatusInput = Pick<
   lastVisitedAt?: string | null | undefined;
   pendingBackgroundTasks?: SidebarThreadSummary["pendingBackgroundTasks"] | undefined;
   blockedOnThreadWait?: boolean | undefined;
+  startAfterThreadId?: ThreadId | null | undefined;
 };
 
 /**
@@ -856,7 +857,9 @@ type SidebarThreadStatusInput = Pick<
   | "pendingGuestMessageCount"
   | "runtime"
   | "blockedOnThreadWait"
->;
+> & {
+  startAfterThreadId?: ThreadId | null | undefined;
+};
 
 export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): SidebarThreadStatus {
   if (thread.hasPendingApprovals || thread.pendingSubagentRequest === "approval") {
@@ -881,7 +884,7 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   ) {
     return "working";
   }
-  if (thread.runtime?.status === "idle") {
+  if (thread.runtime?.status === "idle" || thread.startAfterThreadId != null) {
     return "waiting";
   }
   if (thread.runtime?.status === "failed") {
@@ -1147,6 +1150,7 @@ export function resolveThreadStatusPill(input: {
 
   if (
     (thread.runtime?.status === "running" && thread.blockedOnThreadWait === true) ||
+    thread.startAfterThreadId != null ||
     backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? [])
   ) {
     return {

@@ -47,6 +47,9 @@ import {
   setThreadAutoSettle,
   settleThread,
   snoozeThread,
+  setThreadStartAfter,
+  reorderThreadStartAfter,
+  clearThreadStartAfter,
   startThreadTurn,
   stopThreadSession,
   unarchiveThread,
@@ -176,6 +179,24 @@ export function createThreadEnvironmentAtoms<R, E>(
     unsnooze: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:unsnooze",
       execute: unsnoozeThread,
+      scheduler,
+      concurrency,
+    }),
+    setStartAfter: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:set-start-after",
+      execute: setThreadStartAfter,
+      scheduler,
+      concurrency,
+    }),
+    reorderStartAfter: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:reorder-start-after",
+      execute: reorderThreadStartAfter,
+      scheduler,
+      concurrency,
+    }),
+    clearStartAfter: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:clear-start-after",
+      execute: clearThreadStartAfter,
       scheduler,
       concurrency,
     }),
@@ -419,6 +440,18 @@ export function createThreadEnvironmentAtoms<R, E>(
       ...thread,
       snoozedUntil: null,
       snoozedAt: null,
+    })),
+    setStartAfter: optimistic.wrap(commands.setStartAfter, (thread, input) => ({
+      ...thread,
+      startAfterThreadId: input.startAfterThreadId,
+    })),
+    reorderStartAfter: optimistic.wrap(commands.reorderStartAfter, (thread, input) => ({
+      ...thread,
+      startAfterThreadId: input.startAfterThreadId,
+    })),
+    clearStartAfter: optimistic.wrap(commands.clearStartAfter, (thread) => ({
+      ...thread,
+      startAfterThreadId: null,
     })),
     setAutoSettle: optimistic.wrap(commands.setAutoSettle, (thread, input, now) => ({
       ...thread,

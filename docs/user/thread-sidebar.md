@@ -148,6 +148,23 @@ choice.
 While this is on, the active list is ordered by when each thread last came back to you, so you
 cannot drag or move threads within it. Your saved order returns when you turn it off.
 
+### Queue a follow-on thread
+
+To queue a new thread so it starts automatically after a working thread finishes, right-click the
+working thread in the sidebar and choose **Follow on thread on \<branch\>**, or drag a working thread
+from the sidebar into a new thread draft.
+
+When a draft is set up to queue:
+
+- The **Queue** list appears above the new-thread heading with links to the threads ahead of the
+  draft and shows which thread is currently running.
+- If other threads are already queued after the thread you selected, the new thread is inserted
+  directly after it and the remaining threads in the chain appear below the composer.
+- Drag items within any visible queue to change their order, or drop a working thread from the
+  sidebar above, between, or below items in the queue.
+- Sending your first message queues the thread on the server. When the prior thread finishes and
+  goes idle, the next thread in the queue starts automatically and the queue display hides.
+
 ### Group threads by project (beta)
 
 Turn on **Settings → Labs → Boring sidebar (group by project)** on web and desktop to put active

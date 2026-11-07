@@ -3,6 +3,7 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
 
 export type ThreadActionMenuId =
   | "find"
+  | "follow-on-thread-on-branch"
   | "new-thread-on-branch"
   | "filter-by-project"
   | "turn-into-project"
@@ -71,6 +72,7 @@ export interface ThreadActionMenuState {
   readonly canOperate: boolean;
   readonly canFind?: boolean;
   readonly branch: string | null;
+  readonly canFollowOnBranch?: boolean;
   readonly projectFilter: {
     readonly label: string;
     readonly isActive: boolean;
@@ -101,6 +103,7 @@ export interface ThreadActionMenuState {
 export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean {
   return ![
     "find",
+    "follow-on-thread-on-branch",
     "new-thread-on-branch",
     "project-settings",
     "mark-unread",
@@ -116,9 +119,19 @@ export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean
 export function buildThreadActionMenuItems(
   state: ThreadActionMenuState,
 ): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
+  const separatorAfterBranchActions = Boolean(state.branch && state.canFollowOnBranch);
   const items: ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> = [
     ...(state.canFind
       ? [{ id: "find" as const, label: "Find in thread", icon: "text-search" }]
+      : []),
+    ...(state.branch && state.canFollowOnBranch
+      ? [
+          {
+            id: "follow-on-thread-on-branch" as const,
+            label: `Follow on thread on ${state.branch}`,
+            icon: "list-plus",
+          },
+        ]
       : []),
     ...(state.branch
       ? [
@@ -132,15 +145,35 @@ export function buildThreadActionMenuItems(
     ...(state.supports.pinning
       ? [
           state.isPinned
-            ? { id: "unpin" as const, label: "Unpin thread", icon: "pin-off" }
-            : { id: "pin" as const, label: "Pin thread", icon: "pin" },
+            ? {
+                id: "unpin" as const,
+                label: "Unpin thread",
+                icon: "pin-off",
+                separatorBefore: separatorAfterBranchActions,
+              }
+            : {
+                id: "pin" as const,
+                label: "Pin thread",
+                icon: "pin",
+                separatorBefore: separatorAfterBranchActions,
+              },
         ]
       : []),
     ...(state.supports.settlement
       ? [
           state.isSettled
-            ? { id: "unsettle" as const, label: "Un-settle thread", icon: "circle-check" }
-            : { id: "settle" as const, label: "Settle thread", icon: "circle-check" },
+            ? {
+                id: "unsettle" as const,
+                label: "Un-settle thread",
+                icon: "circle-check",
+                separatorBefore: !state.supports.pinning && separatorAfterBranchActions,
+              }
+            : {
+                id: "settle" as const,
+                label: "Settle thread",
+                icon: "circle-check",
+                separatorBefore: !state.supports.pinning && separatorAfterBranchActions,
+              },
         ]
       : []),
     ...(state.supports.snooze

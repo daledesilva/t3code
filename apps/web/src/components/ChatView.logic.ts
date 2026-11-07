@@ -479,6 +479,7 @@ export function buildLocalDraftThread(
     archivedAt: null,
     settledOverride: null,
     settledAt: null,
+    startAfterThreadId: draftThread.startAfterThreadId ?? null,
     deletedAt: null,
   });
 }
@@ -1402,6 +1403,7 @@ export type ComposerSendSnapshot = ReturnType<typeof snapshotComposerSend>;
 export function planComposerTurn(input: {
   readonly messageText: string;
   readonly sendQueuesBehindSetup: boolean;
+  readonly hasStartAfterTrigger?: boolean;
   readonly isServerThread: boolean;
   readonly activeMessageCount: number;
   readonly sendEnvMode: DraftThreadEnvMode;
@@ -1437,10 +1439,13 @@ export function planComposerTurn(input: {
     baseBranchForWorktree: shouldCreateWorktree ? input.activeThreadBranch : null,
     compactBeforeSend,
     turnDispatchMode:
-      compactBeforeSend || input.sendQueuesBehindSetup ? ("queue" as const) : dispatchMode,
+      compactBeforeSend || input.sendQueuesBehindSetup || input.hasStartAfterTrigger
+        ? ("queue" as const)
+        : dispatchMode,
     shouldQueueBehindActiveRun:
       compactBeforeSend ||
       input.sendQueuesBehindSetup ||
+      Boolean(input.hasStartAfterTrigger) ||
       (input.phase === "running" && dispatchMode === "queue"),
   };
 }

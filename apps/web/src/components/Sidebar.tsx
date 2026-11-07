@@ -1761,7 +1761,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     const threads = contextDragThreads();
     const title =
       threadByKeyRef.current.get(contextDragKeyRef.current ?? "")?.title.trim() || "Thread";
-    moveThreadContextDragGhost(point, { title, count: threads.length });
+    moveThreadContextDragGhost(point, { title, count: threads.length, threads });
     return true;
   };
   const dropThreadContextDrag = (point: { x: number; y: number }) => {
@@ -2613,6 +2613,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 projectRef.projectId === thread.projectId,
             ),
           ) ?? null;
+        const sidebarStatus = resolveSidebarThreadStatus(thread);
+        const runtimeBusy =
+          thread.runtime !== null &&
+          ["preparing", "queued", "starting", "running", "waiting", "idle"].includes(
+            thread.runtime.status,
+          );
+        const canFollowOnBranch =
+          runtimeBusy ||
+          sectionByThreadKeyRef.current.get(threadKey) === "working" ||
+          sidebarStatus === "working" ||
+          sidebarStatus === "preparing" ||
+          sidebarStatus === "waiting" ||
+          thread.startAfterThreadId != null;
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             buildThreadActionMenuItems({
@@ -2621,6 +2634,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 AuthOrchestrationOperateScope,
               ),
               branch: thread.branch ?? null,
+              canFollowOnBranch,
               // An archived project is not a filter choice.
               projectFilter:
                 threadProjectGroup && !threadProjectGroup.archived
@@ -2684,13 +2698,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 projectId: thread.projectId,
               });
             return;
+          case "follow-on-thread-on-branch":
           case "new-thread-on-branch": {
+            const startAfterThreadId =
+              clicked.value === "follow-on-thread-on-branch" ? thread.id : null;
             const result = await settlePromise(() =>
               handleNewThread(scopeProjectRef(thread.environmentId, thread.projectId), {
                 branch: thread.branch,
                 worktreePath: thread.worktreePath,
                 envMode: thread.worktreePath ? "worktree" : "local",
                 startFromOrigin: false,
+                startAfterThreadId,
               }),
             );
             if (result._tag === "Failure") {

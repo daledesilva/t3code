@@ -104,6 +104,7 @@ function shouldPublishAgentAwarenessEvent(
     case "thread.guest-share-updated":
     case "thread.snoozed":
     case "thread.unsnoozed":
+    case "thread.start-after-updated":
     case "thread.auto-settle-set":
     case "thread.pinned":
     case "thread.unpinned":

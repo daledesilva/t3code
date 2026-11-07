@@ -1,4 +1,4 @@
-import type { ModelPreferences } from "@t3tools/contracts/settings";
+import type { ModelPin, ModelPreferences } from "@t3tools/contracts/settings";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_TEXT_GENERATION_MODEL,
@@ -27,13 +27,20 @@ import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { deepMerge } from "./Struct.ts";
 import { fromLenientJson } from "./schemaJson.ts";
-import { createModelSelection, readCustomModelEntries } from "./model.ts";
+import { createModelSelection, modelSelectionsEqual, readCustomModelEntries } from "./model.ts";
 import {
   getBackgroundActivityBaseProfile,
   normalizeBackgroundActivitySettings,
   normalizeServerBackgroundActivitySettings,
   resolveBackgroundActivitySettings,
 } from "./backgroundActivitySettings.ts";
+
+export function modelPinsEqual(left: ModelPin, right: ModelPin): boolean {
+  return modelSelectionsEqual(
+    createModelSelection(left.provider, left.model, left.options),
+    createModelSelection(right.provider, right.model, right.options),
+  );
+}
 
 // Only observability: a value the server migrates on load elsewhere in the file must not drop it.
 const ServerObservabilitySettingsJson = fromLenientJson(
@@ -392,6 +399,7 @@ export function applyServerSettingsPatch(
   const {
     migrateModelPreferences,
     setModelFavorites,
+    setModelPins,
     setModelsHidden,
     setProviderModelOrder,
     providerModelPreferences,
@@ -466,6 +474,26 @@ export function applyServerSettingsPatch(
       },
       [...(initialFavorites ?? [])],
     ) ?? initialFavorites;
+  const initialPins = patch.pins ?? current.pins ?? migrateModelPreferences?.pins ?? null;
+  const pins =
+    setModelPins?.reduce(
+      (current, change) => {
+        const normalizedOptions =
+          change.options && change.options.length > 0 ? [...change.options] : undefined;
+        const targetPin: ModelPin = {
+          provider: change.provider,
+          model: change.model,
+          ...(normalizedOptions ? { options: normalizedOptions } : {}),
+        };
+        const exists = current.some((pin) => modelPinsEqual(pin, targetPin));
+        if (change.pin) {
+          if (!exists) current.push(targetPin);
+          return current;
+        }
+        return current.filter((pin) => !modelPinsEqual(pin, targetPin));
+      },
+      [...(initialPins ?? [])],
+    ) ?? initialPins;
   const initialModelPreferences =
     providerModelPreferences ??
     current.providerModelPreferences ??
@@ -504,6 +532,7 @@ export function applyServerSettingsPatch(
   const nextWithReplacementsBase = {
     ...next,
     favorites,
+    pins,
     providerModelPreferences: nextModelPreferences,
     ...(worktreeCleanupPatch === undefined
       ? {}
@@ -681,11 +710,13 @@ export function applyServerSettingsPatch(
 }
 
 export function resolveModelPreferences(
-  settings: Pick<ServerSettings, "favorites" | "providerModelPreferences">,
+  settings: Pick<ServerSettings, "favorites" | "providerModelPreferences"> &
+    Partial<Pick<ServerSettings, "pins">>,
   legacy: Partial<ModelPreferences> = {},
 ): ModelPreferences {
   return {
     favorites: settings.favorites ?? legacy.favorites ?? [],
+    pins: settings.pins ?? legacy.pins ?? [],
     providerModelPreferences:
       settings.providerModelPreferences ?? legacy.providerModelPreferences ?? {},
   };
@@ -693,23 +724,27 @@ export function resolveModelPreferences(
 
 /** Empty legacy values do not claim ownership before another client can migrate its saved list. */
 export function modelPreferencesMigrationPatch(
-  settings: Pick<ServerSettings, "favorites" | "providerModelPreferences">,
+  settings: Pick<ServerSettings, "favorites" | "providerModelPreferences"> &
+    Partial<Pick<ServerSettings, "pins">>,
   legacy: Partial<ModelPreferences>,
 ): ServerSettingsPatch | null {
   const favorites =
     settings.favorites === null && (legacy.favorites?.length ?? 0) > 0
       ? legacy.favorites
       : undefined;
+  const pins =
+    (settings.pins ?? null) === null && (legacy.pins?.length ?? 0) > 0 ? legacy.pins : undefined;
   const providerModelPreferences =
     settings.providerModelPreferences === null &&
     Object.keys(legacy.providerModelPreferences ?? {}).length > 0
       ? legacy.providerModelPreferences
       : undefined;
-  return favorites === undefined && providerModelPreferences === undefined
+  return favorites === undefined && pins === undefined && providerModelPreferences === undefined
     ? null
     : {
         migrateModelPreferences: {
           ...(favorites === undefined ? {} : { favorites }),
+          ...(pins === undefined ? {} : { pins }),
           ...(providerModelPreferences === undefined ? {} : { providerModelPreferences }),
         },
       };

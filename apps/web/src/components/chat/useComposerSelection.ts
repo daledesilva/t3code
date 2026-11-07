@@ -142,7 +142,10 @@ export function useComposerSelection(input: ComposerSelectionInput) {
   const onProviderModelSelect = (
     instanceId: ProviderInstanceId,
     model: string,
-    options?: { focusComposer?: boolean },
+    options?: {
+      focusComposer?: boolean;
+      modelOptions?: ReadonlyArray<import("@t3tools/contracts").ProviderOptionSelection>;
+    },
   ) => {
     if (!activeThread) return;
     const entry = providerStatuses.find((snapshot) => snapshot.instanceId === instanceId);
@@ -185,9 +188,10 @@ export function useComposerSelection(input: ComposerSelectionInput) {
     }
     const rememberedOptions =
       useComposerDraftStore.getState().stickyOptionsByModelByProvider[instanceId]?.[resolvedModel];
+    const effectiveOptions = options?.modelOptions ?? rememberedOptions;
     const nextModelSelection: ModelSelection =
-      rememberedOptions !== undefined && rememberedOptions.length > 0
-        ? { instanceId, model: resolvedModel, options: [...rememberedOptions] }
+      effectiveOptions !== undefined && effectiveOptions.length > 0
+        ? { instanceId, model: resolvedModel, options: [...effectiveOptions] }
         : { instanceId, model: resolvedModel };
     const modelChangeBlockReason = getStartedThreadModelChangeBlockReason({
       hasStartedSession: activeRuntime !== null,
@@ -205,12 +209,21 @@ export function useComposerSelection(input: ComposerSelectionInput) {
       if (options?.focusComposer !== false) scheduleComposerFocus();
       return;
     }
-    setComposerDraftModelSelection(
-      scopeThreadRef(activeThread.environmentId, activeThread.id),
-      nextModelSelection,
-      { explicit: true, replaceOptions: true },
-    );
+    const scopedRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
+    setComposerDraftModelSelection(scopedRef, nextModelSelection, {
+      explicit: true,
+      replaceOptions: true,
+    });
     setStickyComposerModelSelection(nextModelSelection);
+    if (options?.modelOptions !== undefined && resolvedDriverKind !== null) {
+      useComposerDraftStore
+        .getState()
+        .setProviderModelOptions(scopedRef, resolvedDriverKind, options.modelOptions, {
+          instanceId,
+          model: resolvedModel,
+          persistSticky: true,
+        });
+    }
     if (options?.focusComposer !== false) scheduleComposerFocus();
   };
   const onProviderModelSelectStable = useStableCallback(onProviderModelSelect);

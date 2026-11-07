@@ -29,6 +29,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
   /** Marks this instance apart from another of the same provider. */
   showInstanceBadge: boolean;
   showNewBadge?: boolean;
+  speedLabel?: "Standard" | "Fast" | "Ultrafast" | null | undefined;
   unavailable?: boolean;
   jumpLabel?: string | null;
   disabledReason?: string | null;
@@ -79,6 +80,11 @@ export const ModelListRow = memo(function ModelListRow(props: {
           {/* The logo is decorative, so name the provider for screen readers. */}
           <span className="sr-only">, {props.providerDisplayName}</span>
         </div>
+        {props.speedLabel ? (
+          <Badge variant="outline" size="sm" className="shrink-0">
+            {props.speedLabel}
+          </Badge>
+        ) : null}
         {props.isSelected ? <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" /> : null}
         {props.subProvider ? (
           <span className="min-w-0 shrink truncate text-xs text-muted-foreground/70">

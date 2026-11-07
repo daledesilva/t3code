@@ -867,6 +867,16 @@ describe("synchronized model preferences", () => {
   const provider = ProviderInstanceId.make("codex_work");
   const legacy = {
     favorites: [{ provider, model: "sol" }],
+    pins: [
+      {
+        provider,
+        model: "sol",
+        options: [
+          { id: "reasoningEffort", value: "high" },
+          { id: "serviceTier", value: "fast" },
+        ],
+      },
+    ],
     providerModelPreferences: { [provider]: { hiddenModels: ["astra"], modelOrder: ["sol"] } },
   };
 
@@ -878,6 +888,38 @@ describe("synchronized model preferences", () => {
     const removed = applyServerSettingsPatch(first, remove);
     expect(applyServerSettingsPatch(removed, remove).favorites).toEqual([]);
     expect(first.favorites).toEqual([{ provider, model: "sol" }]);
+  });
+
+  it("keeps concurrent adds and removes of the same pin idempotent and distinguishes options", () => {
+    const fastHighOptions = [
+      { id: "reasoningEffort", value: "high" },
+      { id: "serviceTier", value: "fast" },
+    ];
+    const standardHighOptions = [
+      { id: "reasoningEffort", value: "high" },
+      { id: "serviceTier", value: "default" },
+    ];
+    const addFast = {
+      setModelPins: [{ provider, model: "sol", options: fastHighOptions, pin: true }],
+    };
+    const first = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, addFast);
+    expect(applyServerSettingsPatch(first, addFast).pins).toEqual([
+      { provider, model: "sol", options: fastHighOptions },
+    ]);
+    const withStandard = applyServerSettingsPatch(first, {
+      setModelPins: [{ provider, model: "sol", options: standardHighOptions, pin: true }],
+    });
+    expect(withStandard.pins).toEqual([
+      { provider, model: "sol", options: fastHighOptions },
+      { provider, model: "sol", options: standardHighOptions },
+    ]);
+    const removeFast = {
+      setModelPins: [{ provider, model: "sol", options: fastHighOptions, pin: false }],
+    };
+    const removed = applyServerSettingsPatch(withStandard, removeFast);
+    expect(applyServerSettingsPatch(removed, removeFast).pins).toEqual([
+      { provider, model: "sol", options: standardHighOptions },
+    ]);
   });
 
   it("preserves unrelated models and providers during bulk visibility and order edits", () => {
@@ -921,7 +963,10 @@ describe("synchronized model preferences", () => {
     const migrated = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, patch);
     expect(resolveModelPreferences(migrated)).toEqual(legacy);
     expect(modelPreferencesMigrationPatch(migrated, legacy)).toBeNull();
-    const favoritesOnly = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, { favorites: [] });
+    const favoritesOnly = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      favorites: [],
+      pins: [],
+    });
     expect(modelPreferencesMigrationPatch(favoritesOnly, legacy)).toEqual({
       migrateModelPreferences: { providerModelPreferences: legacy.providerModelPreferences },
     });
@@ -931,12 +976,14 @@ describe("synchronized model preferences", () => {
     const staleMigration = modelPreferencesMigrationPatch(DEFAULT_SERVER_SETTINGS, legacy)!;
     const cleared = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       favorites: [],
+      pins: [],
       providerModelPreferences: {},
     });
     expect(
       resolveModelPreferences(applyServerSettingsPatch(cleared, staleMigration), legacy),
     ).toEqual({
       favorites: [],
+      pins: [],
       providerModelPreferences: {},
     });
   });

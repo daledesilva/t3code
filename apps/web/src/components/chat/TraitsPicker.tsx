@@ -61,10 +61,30 @@ const SAVED_OPTION_LABELS: Readonly<Record<string, string>> = {
   variant: "Reasoning",
 };
 
+const SAVED_OPTION_VALUE_LABELS: Readonly<Record<string, string>> = {
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra High",
+  max: "Max",
+  off: "Off",
+  none: "None",
+};
+
 function savedOptionLabel(id: string): string {
   return (
     SAVED_OPTION_LABELS[id] ??
     id.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, (character) => character.toUpperCase())
+  );
+}
+
+function savedOptionValueLabel(value: string): string {
+  return (
+    SAVED_OPTION_VALUE_LABELS[value] ??
+    value
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/^./, (character) => character.toUpperCase())
   );
 }
 
@@ -83,7 +103,7 @@ function buildUnavailableModelOptionDescriptors(
           id: selection.id,
           label: savedOptionLabel(selection.id),
           type: "select" as const,
-          options: [{ id: selection.value, label: selection.value }],
+          options: [{ id: selection.value, label: savedOptionValueLabel(selection.value) }],
           currentValue: selection.value,
         },
   );
@@ -119,8 +139,8 @@ function getSelectedTraits(
 ) {
   const caps = getProviderModelCapabilities(models, model, provider, planModeEnabled);
   const modelIsUnavailable =
-    provider === "opencode" &&
-    !models.some((candidate) => candidate.slug === normalizeModelSlug(model, provider));
+    !models.some((candidate) => candidate.slug === normalizeModelSlug(model, provider)) &&
+    (provider === "opencode" || (modelOptions?.length ?? 0) > 0);
   const descriptors = modelIsUnavailable
     ? buildUnavailableModelOptionDescriptors(
         planModeEnabled

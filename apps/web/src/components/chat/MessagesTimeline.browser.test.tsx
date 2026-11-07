@@ -639,6 +639,52 @@ describe("MessagesTimeline usage limit notice", () => {
       await session.send("Emulation.setTimezoneOverride", { timezoneId: "" });
     }
   });
+
+  it("shows the run model and traits on user messages and usage-limit rows", async () => {
+    const instanceId = ProviderInstanceId.make("claudeAgent");
+    const runId = RunId.make("usage-limit-run");
+    await using screen = await renderTimeline(
+      [
+        message("Prompt with run", {}, "msg-with-run"),
+        message("Pending prompt without run", {}, "msg-without-run"),
+        ...usageLimitEntries("2026-03-17T19:30:00.000Z"),
+      ],
+      {
+        runs: [
+          {
+            id: runId,
+            ordinal: 1,
+            userMessageId: MessageId.make("msg-with-run"),
+            providerInstanceId: instanceId,
+            modelSelection: {
+              instanceId,
+              model: "claude-sonnet-4-6",
+              options: [
+                { id: "effort", value: "high" },
+                { id: "fastMode", value: true },
+              ],
+            },
+          },
+        ],
+      },
+    );
+
+    const userModelChips = screen.container.querySelectorAll(
+      '[data-testid="user-message-model-chip"]',
+    );
+    expect(userModelChips).toHaveLength(1);
+    expect(userModelChips[0]?.textContent).toContain("Sonnet 4.6");
+    expect(userModelChips[0]?.getAttribute("aria-label")).toBe("Claude Sonnet 4.6 · High Fast");
+
+    const usageLimitModelChips = screen.container.querySelectorAll(
+      '[data-testid="usage-limit-model-chip"]',
+    );
+    expect(usageLimitModelChips).toHaveLength(1);
+    expect(usageLimitModelChips[0]?.textContent).toContain("Sonnet 4.6");
+    expect(usageLimitModelChips[0]?.getAttribute("aria-label")).toBe(
+      "Claude Sonnet 4.6 · High Fast",
+    );
+  });
 });
 
 const CITATION_REQUEST = {

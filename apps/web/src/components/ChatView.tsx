@@ -32,7 +32,11 @@ import { useImplementPlanInNewThread } from "./chat/useProposedPlanSend";
 import { ThreadFind, ThreadFindCanvas } from "./chat/ThreadFindProvider";
 import { closeThreadFind, openThreadFind, useThreadFindOpen } from "./chat/threadFindStore";
 import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
-import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
+import {
+  exhaustedModelUsageLimitBannerItem,
+  usageLimitRecoveryBannerItem,
+} from "./chat/UsageLimitRecoveryBanner";
+import { formatModelSelectionTriggerLabel } from "./chat/TimelineRunModelChip";
 import { resolveDraftHeroState } from "./ChatView.logic";
 import { useQueuedRunEdit } from "./chat/useQueuedRunEdit";
 import { recallCheckoutIsRepo, rememberCheckoutIsRepo } from "./ChatView.logic";
@@ -84,6 +88,8 @@ import {
   deriveLatestThreadRun,
   deriveThreadStructureRuntime,
   limitRecoveryOwnsSnooze,
+  resolveExhaustedModelUsageLimit,
+  shouldShowUsageLimitRecovery,
 } from "@t3tools/client-runtime/state/thread-execution";
 import {
   resolveWorkflowOpening,
@@ -2395,6 +2401,41 @@ export default function ChatView(props: ChatViewProps) {
     closeRightPanelSurface,
   });
   const pullRequestSurfaceAvailable = supportsPullRequests && pullRequestPanelTarget !== null;
+  const defaultComposerModelSelection =
+    draftDefaultModelSelection ??
+    resolveProjectDefaultProviderModelSelection(
+      providerStatuses,
+      settings,
+      activeThread?.projectId ?? draftThread?.projectId ?? null,
+    );
+  const fallbackEffectiveComposerSelection =
+    activeThread && activeThread.modelSelection.model.trim().length > 0
+      ? activeThread.modelSelection
+      : defaultComposerModelSelection;
+  const effectiveComposerModelSelection =
+    composerSelectedModelSelection ?? fallbackEffectiveComposerSelection;
+  const selectedComposerModelSelections =
+    multipleModelSelections && multipleModelSelections.length > 0
+      ? multipleModelSelections
+      : [effectiveComposerModelSelection];
+  const limitRecoveryRunModelSelection =
+    limitRecoveryRun === null
+      ? null
+      : (serverProjection?.runs.find((run) => run.id === limitRecoveryRun.runId)?.modelSelection ??
+        activeThreadShell?.modelSelection ??
+        null);
+  const limitRecoveryNow = Date.parse(`${nowMinute}:00Z`);
+  const showLimitRecoveryBanner =
+    limitRecoveryRun !== null &&
+    activeThreadShell !== null &&
+    shouldShowUsageLimitRecovery({
+      selectedModelSelections: selectedComposerModelSelections,
+      limitedModelSelection: limitRecoveryRunModelSelection,
+      providers: providerStatuses,
+      now: limitRecoveryNow,
+    });
+  // The recovery banner offers Wake now for a snooze it set.
+  const gatedLimitRecoveryHoldsSnooze = showLimitRecoveryBanner && limitRecoveryHoldsSnooze;
   const {
     acknowledgeActiveThreadWoke,
     activeBranchMismatchKey,
@@ -2424,7 +2465,7 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadKey,
     activeThreadShell,
     activeLatestRun,
-    limitRecoveryHoldsSnooze,
+    limitRecoveryHoldsSnooze: gatedLimitRecoveryHoldsSnooze,
     activeProjectCwd,
     serverConfig,
     runtimeMode,
@@ -2553,7 +2594,7 @@ export default function ChatView(props: ChatViewProps) {
     return item ? [item] : [];
   });
   const limitRecoveryBanner =
-    limitRecoveryRun !== null && activeThreadShell !== null
+    showLimitRecoveryBanner && limitRecoveryRun !== null && activeThreadShell !== null
       ? usageLimitRecoveryBannerItem({
           runId: limitRecoveryRun.runId,
           errorCode: serverRuntime?.lastErrorCode ?? null,
@@ -2573,6 +2614,27 @@ export default function ChatView(props: ChatViewProps) {
           },
         })
       : null;
+  const exhaustedModelLimit =
+    limitRecoveryBanner === null
+      ? resolveExhaustedModelUsageLimit({
+          selectedModelSelections: selectedComposerModelSelections,
+          providers: providerStatuses,
+          now: limitRecoveryNow,
+        })
+      : null;
+  const exhaustedModelBanner =
+    exhaustedModelLimit === null
+      ? null
+      : exhaustedModelUsageLimitBannerItem({
+          instanceId: exhaustedModelLimit.modelSelection.instanceId,
+          model: exhaustedModelLimit.modelSelection.model,
+          modelLabel: formatModelSelectionTriggerLabel(
+            exhaustedModelLimit.modelSelection,
+            providerStatuses,
+          ),
+          resetAt: exhaustedModelLimit.resetsAt,
+          timestampFormat,
+        });
   const composerBannerItems = (() => {
     const fallbackSelection = draftFallback?.selection;
     const defaultSelection =
@@ -2619,7 +2681,12 @@ export default function ChatView(props: ChatViewProps) {
             }),
           ]
         : [];
-    const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
+    const limitRecoveryItems =
+      limitRecoveryBanner !== null
+        ? [limitRecoveryBanner]
+        : exhaustedModelBanner !== null
+          ? [exhaustedModelBanner]
+          : [];
     const extensionStatusBanner = extensionStatusBannerItem(
       deriveProviderExtensionStatuses(serverProjection),
     );

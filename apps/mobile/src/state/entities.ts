@@ -267,3 +267,16 @@ export function useThreadReportedModelSelection(ref: ScopedThreadRef | null) {
     selectReportedModelSelection,
   );
 }
+
+export function useThreadRunModelSelection(
+  ref: ScopedThreadRef | null,
+  runId: string | null | undefined,
+) {
+  return useAtomValue(
+    ref === null ? EMPTY_THREAD_ATOM : environmentThreadDetails.threadAtom(ref),
+    (thread) =>
+      thread === null || !runId
+        ? null
+        : (thread.projection.runs.find((run) => run.id === runId)?.modelSelection ?? null),
+  );
+}

@@ -86,8 +86,21 @@ function columnControls(
  * Appearance setting), a bolt for Fast, a workflow icon for Ultracode, and other traits such as a
  * context window.
  */
+export type ComposerEffortTraitsInput = Pick<
+  TraitsSelectionInput,
+  | "provider"
+  | "instanceId"
+  | "models"
+  | "model"
+  | "promptUltrathink"
+  | "modelOptions"
+  | "reportedModelSelection"
+  | "allowPromptInjectedEffort"
+  | "planModeEnabled"
+>;
+
 export function describeComposerEffort(
-  traits: TraitsSelectionInput | null,
+  traits: ComposerEffortTraitsInput | null,
   effortDisplay: EffortDisplay,
   size: ComposerControlSize,
 ): { suffix: ReactNode; detail: string | null } {

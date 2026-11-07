@@ -57,6 +57,7 @@ import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { formatBytes } from "../../lib/formatBytes";
 import { shouldCollapseUserMessage } from "./MessagesTimeline.logic";
+import { TimelineRunModelChip } from "./TimelineRunModelChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   asKnownContextRecord,
@@ -772,9 +773,10 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       </div>
     ) : null;
 
+  const messageRun = ctx.runs.findLast((run) => run.userMessageId === row.message.id);
   // Touch shows actions all the time, and narrow lanes have no room beside the
   // bubble, so both keep the actions on their own line.
-  const floatActions = row.groupedWithNext === true && !coarsePointer;
+  const floatActions = row.groupedWithNext === true && !coarsePointer && messageRun === undefined;
   const messageActions = (
     <div
       className={cn(
@@ -1031,12 +1033,20 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       {!folded || expanded ? (
         <div
           className={cn(
-            "flex w-full max-w-[80%] justify-end pe-1",
+            "flex w-full max-w-[80%] items-center justify-between gap-2 pe-1 ps-1",
             floatActions && "@min-[37rem]:hidden",
-            ACTIONS_REVEAL_CLASS_NAME,
           )}
         >
-          {messageActions}
+          {messageRun ? (
+            <TimelineRunModelChip
+              environmentId={ctx.activeThreadEnvironmentId}
+              providerInstanceId={messageRun.providerInstanceId}
+              modelSelection={messageRun.modelSelection}
+              prompt={row.message.text}
+              testId="user-message-model-chip"
+            />
+          ) : null}
+          <div className={cn("ms-auto flex", ACTIONS_REVEAL_CLASS_NAME)}>{messageActions}</div>
         </div>
       ) : null}
     </div>

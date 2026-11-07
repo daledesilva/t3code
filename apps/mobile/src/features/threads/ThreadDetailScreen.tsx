@@ -13,7 +13,11 @@ import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import { mobilePreferencesAtom } from "../../state/preferences";
 import { parseThreadKey, threadKey } from "@t3tools/client-runtime/state/entities";
 import { createThreadVisitTracker } from "@t3tools/client-runtime/state/thread-visits";
-import { useChildThreadInputs, useThreadReportedModelSelection } from "../../state/entities";
+import {
+  useChildThreadInputs,
+  useThreadReportedModelSelection,
+  useThreadRunModelSelection,
+} from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import {
@@ -66,6 +70,7 @@ import {
   limitRecoveryOwnsSnooze,
   presentPendingBackgroundWork,
   presentProviderGoal,
+  shouldShowUsageLimitRecovery,
 } from "@t3tools/client-runtime/state/thread-execution";
 import { resolveSubagentPillSegment } from "@t3tools/client-runtime/state/thread-subagents";
 import {
@@ -404,6 +409,10 @@ function ThreadDetailBody(
   const openInspector = useOpenThreadInspector();
   const { session: voiceInputSession } = useGlobalVoiceInput();
   const reportedModelSelection = useThreadReportedModelSelection(props.selectedThreadDetailRef);
+  const limitedRunModelSelection = useThreadRunModelSelection(
+    props.selectedThreadDetailRef,
+    props.selectedThread.latestRun?.runId,
+  );
   const deviceState = useEnvironmentQuery(
     deviceEnvironment.state({ environmentId: props.environmentId, input: {} }),
   );
@@ -651,18 +660,26 @@ function ThreadDetailBody(
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Re-arm if timer clamping fires before the wake time.
   }, [snoozed, snoozedUntil, lifecycleNow]);
   // The usage-limit recovery card shows this snooze and its Wake now.
+  const showLimitRecovery =
+    props.selectedThread.runtime?.status === "failed" &&
+    props.selectedThread.runtime.lastErrorClass === "usage_limit" &&
+    shouldShowUsageLimitRecovery({
+      selectedModelSelections: [props.selectedThread.modelSelection],
+      limitedModelSelection: limitedRunModelSelection ?? props.selectedThread.modelSelection,
+      providers: props.serverConfig?.providers ?? [],
+      now: Date.parse(lifecycleNow),
+    });
   const lifecycleSnoozed =
     snoozed &&
-    !limitRecoveryOwnsSnooze({
-      runId:
-        props.selectedThread.runtime?.status === "failed" &&
-        props.selectedThread.runtime.lastErrorClass === "usage_limit"
-          ? props.selectedThread.latestRun?.runId
-          : null,
-      resetAt: props.selectedThread.runtime?.usageLimitResetAt,
-      recovery: props.selectedThread.limitRecovery,
-      snoozedUntil,
-    });
+    !(
+      showLimitRecovery &&
+      limitRecoveryOwnsSnooze({
+        runId: props.selectedThread.latestRun?.runId,
+        resetAt: props.selectedThread.runtime?.usageLimitResetAt,
+        recovery: props.selectedThread.limitRecovery,
+        snoozedUntil,
+      })
+    );
   const settled = configLoaded && props.selectedThread.settledOverride === "settled";
   const wokeAt = configLoaded ? threadWokeAt(props.selectedThread, { now: lifecycleNow }) : null;
   const woke = isThreadWokeUnseen({
@@ -1676,9 +1693,14 @@ function ThreadDetailBody(
                       </Animated.View>
                     ) : null}
                     <UsageLimitRecoveryCard
-                      key={props.selectedThread.latestRun?.runId}
+                      key={
+                        props.selectedThread.latestRun?.runId ??
+                        `${props.selectedThread.modelSelection.instanceId}:${props.selectedThread.modelSelection.model}`
+                      }
                       thread={props.selectedThread}
                       environmentId={props.environmentId}
+                      providers={props.serverConfig?.providers ?? []}
+                      limitedModelSelection={limitedRunModelSelection}
                     />
                     <ChildThreadApprovals
                       threadRef={props.selectedThreadDetailRef}

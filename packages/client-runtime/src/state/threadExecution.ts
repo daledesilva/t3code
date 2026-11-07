@@ -16,6 +16,7 @@ import {
   type OrchestrationV2ProviderSession,
   type ServerProvider,
   type ServerProviderModel,
+  type ServerProviderUsageWindow,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2LimitRecovery,
   type OrchestrationV2ThreadProjection,
@@ -34,6 +35,7 @@ import {
   resolveSelectableModel,
   withLegacyUltracodeEffort,
 } from "@t3tools/shared/model";
+import { exhaustedUsageWindow } from "@t3tools/shared/usageLimits";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import * as DateTime from "effect/DateTime";
 
@@ -373,9 +375,9 @@ const PROVIDER_LIMIT_NOTICE =
   /^(?:You[’']ve hit your (?:(?:5-hour|session|weekly|usage) )?limit|You[’']re out of extra usage|Claude AI usage limit reached)(?: · resets (?:[1-9]|1[0-2])(?::[0-5]\d)?(?:am|pm)(?: \([A-Za-z0-9_+-]+(?:\/[A-Za-z0-9_+-]+)*\))?)?\.?$/i;
 
 /**
- * The timeline rows that repeat a usage-limit pause while its recovery notice shows: the run's
- * limit failure, Claude's pause notices, and the provider's own limit message. They return to
- * history once another run executes.
+ * The timeline rows that repeat a usage-limit pause while its recovery notice shows: Claude's
+ * pause notices and the provider's own limit message. The run's limit failure row stays in the
+ * timeline where the thread stopped so it can show which model hit the limit.
  */
 export function deriveUsageLimitNoticeRows(
   projection: ThreadStructure,
@@ -394,10 +396,10 @@ export function deriveUsageLimitNoticeRows(
       item.type === "error" &&
       item.status === "failed" &&
       item.nodeId === run.rootNodeId &&
-      item.failure.class === "usage_limit"
+      item.failure.class === "usage_limit" &&
+      item.failure === failure
     ) {
-      itemIds.add(item.id);
-      if (item.failure === failure) failedProviderTurnId = item.providerTurnId;
+      failedProviderTurnId = item.providerTurnId;
     }
   }
   let providerNotice: ThreadStructureTurnItem | null = null;
@@ -454,6 +456,118 @@ export function limitRecoveryOwnsSnooze(input: {
     snoozedUntil != null &&
     Date.parse(snoozedUntil) === Date.parse(resetAt)
   );
+}
+
+function usageLimitPoolKey(
+  provider: Pick<ServerProvider, "driver" | "usageLimits"> | undefined,
+  model: string,
+): string | null {
+  const trimmed = model.trim();
+  if (!trimmed) return null;
+  if (!provider) return `model:${trimmed}`;
+  switch (provider.driver) {
+    case "cursor":
+      return /^(auto|default|grok|composer)/.test(trimmed) ? "cursor:auto" : "cursor:api";
+    case "antigravity": {
+      const family = trimmed.match(/^(gemini|claude|gpt)-/)?.[1];
+      if (!family) return `antigravity:${trimmed}`;
+      if (
+        (family === "claude" || family === "gpt") &&
+        (provider.usageLimits?.windows ?? []).some((window) => window.id.startsWith("3p-"))
+      ) {
+        return "antigravity:3p";
+      }
+      return `antigravity:${family}`;
+    }
+    case "opencode":
+      if (trimmed.startsWith("opencode-go/")) return "opencode:go";
+      return (provider.usageLimits?.windows ?? []).some((window) => !window.id.startsWith("go_"))
+        ? "opencode:account"
+        : `opencode:${trimmed}`;
+    default:
+      return (provider.usageLimits?.windows.length ?? 0) > 0
+        ? `${provider.driver}:shared`
+        : `${provider.driver}:${trimmed}`;
+  }
+}
+
+export function sharesUsageLimitPool(input: {
+  readonly selected: ModelSelection | null | undefined;
+  readonly limited: ModelSelection | null | undefined;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly now?: number;
+}): boolean {
+  const { selected, limited, providers } = input;
+  if (!selected || !limited || selected.instanceId !== limited.instanceId) {
+    return false;
+  }
+  const provider = providers.find((entry) => entry.instanceId === selected.instanceId);
+  const selectedModel = selected.model.trim();
+  const limitedModel = limited.model.trim();
+  if (!selectedModel || !limitedModel) return false;
+  if (selectedModel === limitedModel) return true;
+  if (!provider) return false;
+  if (input.now !== undefined) {
+    const selectedWindow = exhaustedUsageWindow(provider, input.now, selectedModel);
+    const limitedWindow = exhaustedUsageWindow(provider, input.now, limitedModel);
+    if (selectedWindow !== undefined && selectedWindow.id === limitedWindow?.id) {
+      return true;
+    }
+  }
+  const selectedPool = usageLimitPoolKey(provider, selectedModel);
+  const limitedPool = usageLimitPoolKey(provider, limitedModel);
+  return selectedPool !== null && selectedPool === limitedPool;
+}
+
+export function shouldShowUsageLimitRecovery(input: {
+  readonly selectedModelSelections: ReadonlyArray<ModelSelection | null | undefined>;
+  readonly limitedModelSelection: ModelSelection | null | undefined;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly now?: number;
+}): boolean {
+  if (!input.limitedModelSelection) return false;
+  return input.selectedModelSelections.some((selected) =>
+    sharesUsageLimitPool({
+      selected,
+      limited: input.limitedModelSelection,
+      providers: input.providers,
+      ...(input.now === undefined ? {} : { now: input.now }),
+    }),
+  );
+}
+
+export interface ExhaustedModelUsageLimit {
+  readonly provider: ServerProvider;
+  readonly modelSelection: ModelSelection;
+  readonly window: ServerProviderUsageWindow;
+  readonly resetsAt: string | null;
+}
+
+export function resolveExhaustedModelUsageLimit(input: {
+  readonly selectedModelSelections: ReadonlyArray<ModelSelection | null | undefined>;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly now?: number;
+}): ExhaustedModelUsageLimit | null {
+  for (const selection of input.selectedModelSelections) {
+    if (!selection) continue;
+    const provider = input.providers.find((entry) => entry.instanceId === selection.instanceId);
+    if (!provider) continue;
+    const modelSlug = selection.model.trim();
+    if (!modelSlug) continue;
+    const checkedAtMs = provider.usageLimits?.checkedAt
+      ? Date.parse(provider.usageLimits.checkedAt)
+      : Number.NaN;
+    const cutoff = input.now ?? (Number.isFinite(checkedAtMs) ? checkedAtMs : 0);
+    const window = exhaustedUsageWindow(provider, cutoff, modelSlug);
+    if (!window) continue;
+    return {
+      provider,
+      modelSelection: selection,
+      window,
+      resetsAt: window.resetsAt ?? null,
+    };
+  }
+  return null;
 }
 
 export function threadRuntimeHasInterruptibleRun(

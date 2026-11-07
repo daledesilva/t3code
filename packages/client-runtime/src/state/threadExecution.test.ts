@@ -12,6 +12,7 @@ import {
   ThreadId,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2RunStatus,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { createModelCapabilities, createModelSelection } from "@t3tools/shared/model";
@@ -28,11 +29,15 @@ import {
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
   deriveThreadRuntime,
+  deriveUsageLimitNoticeRows,
   formatModelSelectionEffort,
   isBackgroundWorkStopPending,
   presentPendingBackgroundWork,
   presentProviderGoal,
   presentRunStop,
+  resolveExhaustedModelUsageLimit,
+  sharesUsageLimitPool,
+  shouldShowUsageLimitRecovery,
   threadRuntimeHasInterruptibleRun,
 } from "./threadExecution.ts";
 
@@ -644,5 +649,294 @@ describe("presentPendingBackgroundWork", () => {
       },
     ]);
     expect(presentation?.items[0]?.label).toBe("mv a.ts b.ts\ncat > b.ts <<'EOF'\nexport {};\nEOF");
+  });
+});
+
+describe("usage limit gating and exhausted model resolution", () => {
+  const checkedAt = "2026-07-28T10:00:00.000Z";
+  const futureResetAt = "2026-07-28T12:00:00.000Z";
+  const nowMs = Date.parse(checkedAt);
+
+  function makeProvider(
+    partial: Partial<ServerProvider> & Pick<ServerProvider, "instanceId" | "driver">,
+  ): ServerProvider {
+    return {
+      instanceId: partial.instanceId,
+      driver: partial.driver,
+      displayName: partial.displayName ?? partial.driver,
+      enabled: true,
+      status: "ready",
+      installed: true,
+      version: null,
+      checkedAt,
+      auth: { status: "authenticated" },
+      models: partial.models ?? [],
+      slashCommands: [],
+      skills: [],
+      supportedRuntimeModes: ["full-access"],
+      usageLimits: partial.usageLimits,
+    };
+  }
+
+  it("matches exact models and models sharing a provider usage-limit pool", () => {
+    const claudeInstance = ProviderInstanceId.make("claudeAgent");
+    const antigravityInstance = ProviderInstanceId.make("antigravity");
+    const cursorInstance = ProviderInstanceId.make("cursor");
+    const opencodeInstance = ProviderInstanceId.make("opencode");
+    const providers: ReadonlyArray<ServerProvider> = [
+      makeProvider({
+        instanceId: claudeInstance,
+        driver: ProviderDriverKind.make("claudeAgent"),
+        usageLimits: {
+          checkedAt,
+          windows: [
+            {
+              id: "session",
+              kind: "session",
+              label: "5-hour session",
+              usedPercent: 100,
+              resetsAt: futureResetAt,
+            },
+          ],
+        },
+      }),
+      makeProvider({
+        instanceId: antigravityInstance,
+        driver: ProviderDriverKind.make("antigravity"),
+        usageLimits: {
+          checkedAt,
+          windows: [
+            {
+              id: "gemini-weekly",
+              kind: "weekly",
+              label: "Gemini",
+              usedPercent: 100,
+              resetsAt: futureResetAt,
+            },
+            {
+              id: "claude-weekly",
+              kind: "weekly",
+              label: "Claude",
+              usedPercent: 20,
+              resetsAt: futureResetAt,
+            },
+          ],
+        },
+      }),
+      makeProvider({
+        instanceId: cursorInstance,
+        driver: ProviderDriverKind.make("cursor"),
+      }),
+      makeProvider({
+        instanceId: opencodeInstance,
+        driver: ProviderDriverKind.make("opencode"),
+        usageLimits: {
+          checkedAt,
+          windows: [
+            {
+              id: "go_5h",
+              kind: "session",
+              label: "Go 5h",
+              usedPercent: 100,
+              resetsAt: futureResetAt,
+            },
+          ],
+        },
+      }),
+    ];
+
+    expect(
+      sharesUsageLimitPool({
+        selected: createModelSelection(claudeInstance, "claude-haiku-4-5"),
+        limited: createModelSelection(claudeInstance, "claude-opus-4-6"),
+        providers,
+        now: nowMs,
+      }),
+    ).toBe(true);
+
+    expect(
+      sharesUsageLimitPool({
+        selected: createModelSelection(antigravityInstance, "gemini-2.5-flash"),
+        limited: createModelSelection(antigravityInstance, "gemini-2.5-pro"),
+        providers,
+        now: nowMs,
+      }),
+    ).toBe(true);
+
+    expect(
+      sharesUsageLimitPool({
+        selected: createModelSelection(antigravityInstance, "claude-sonnet-4-6"),
+        limited: createModelSelection(antigravityInstance, "gemini-2.5-pro"),
+        providers,
+        now: nowMs,
+      }),
+    ).toBe(false);
+
+    expect(
+      sharesUsageLimitPool({
+        selected: createModelSelection(cursorInstance, "auto"),
+        limited: createModelSelection(cursorInstance, "claude-4.6-sonnet"),
+        providers,
+        now: nowMs,
+      }),
+    ).toBe(false);
+
+    expect(
+      sharesUsageLimitPool({
+        selected: createModelSelection(opencodeInstance, "opencode-go/glm-5"),
+        limited: createModelSelection(opencodeInstance, "opencode-go/kimi-k2.5"),
+        providers,
+        now: nowMs,
+      }),
+    ).toBe(true);
+
+    expect(
+      sharesUsageLimitPool({
+        selected: createModelSelection(opencodeInstance, "anthropic/claude-sonnet-4-6"),
+        limited: createModelSelection(opencodeInstance, "opencode-go/glm-5"),
+        providers,
+        now: nowMs,
+      }),
+    ).toBe(false);
+  });
+
+  it("gates shouldShowUsageLimitRecovery on the selected composer models", () => {
+    const antigravityInstance = ProviderInstanceId.make("antigravity");
+    const providers = [
+      makeProvider({
+        instanceId: antigravityInstance,
+        driver: ProviderDriverKind.make("antigravity"),
+      }),
+    ];
+    const limited = createModelSelection(antigravityInstance, "gemini-2.5-pro");
+
+    expect(
+      shouldShowUsageLimitRecovery({
+        selectedModelSelections: [createModelSelection(antigravityInstance, "gemini-2.5-flash")],
+        limitedModelSelection: limited,
+        providers,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldShowUsageLimitRecovery({
+        selectedModelSelections: [createModelSelection(antigravityInstance, "claude-sonnet-4-6")],
+        limitedModelSelection: limited,
+        providers,
+      }),
+    ).toBe(false);
+  });
+
+  it("resolves an exhausted usage window for the selected model", () => {
+    const antigravityInstance = ProviderInstanceId.make("antigravity");
+    const providers = [
+      makeProvider({
+        instanceId: antigravityInstance,
+        driver: ProviderDriverKind.make("antigravity"),
+        usageLimits: {
+          checkedAt,
+          windows: [
+            {
+              id: "gemini-weekly",
+              kind: "weekly",
+              label: "Gemini",
+              usedPercent: 100,
+              resetsAt: futureResetAt,
+            },
+            {
+              id: "claude-weekly",
+              kind: "weekly",
+              label: "Claude",
+              usedPercent: 45,
+              resetsAt: futureResetAt,
+            },
+          ],
+        },
+      }),
+    ];
+
+    expect(
+      resolveExhaustedModelUsageLimit({
+        selectedModelSelections: [createModelSelection(antigravityInstance, "gemini-2.5-pro")],
+        providers,
+        now: nowMs,
+      }),
+    ).toMatchObject({
+      modelSelection: {
+        instanceId: antigravityInstance,
+        model: "gemini-2.5-pro",
+      },
+      resetsAt: futureResetAt,
+    });
+
+    expect(
+      resolveExhaustedModelUsageLimit({
+        selectedModelSelections: [createModelSelection(antigravityInstance, "claude-sonnet-4-6")],
+        providers,
+        now: nowMs,
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps the usage-limit error item in timeline rows while hiding duplicate provider notices", () => {
+    const failed = {
+      ...run("limited", 1, "failed"),
+      rootNodeId: NodeId.make("root"),
+      completedAt: now,
+    };
+    const providerTurnId = ProviderTurnId.make("turn-1");
+    const errorItem = {
+      id: TurnItemId.make("limit-error"),
+      threadId: v2Projection.thread.id,
+      runId: failed.id,
+      nodeId: failed.rootNodeId,
+      providerThreadId: null,
+      providerTurnId,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: 1,
+      type: "error" as const,
+      status: "failed" as const,
+      title: "Usage limit reached",
+      startedAt: now,
+      completedAt: now,
+      updatedAt: now,
+      failure: {
+        class: "usage_limit" as const,
+        message: "You've hit your usage limit.",
+        code: "usageLimitExceeded",
+        retryable: true,
+      },
+    };
+    const claudePauseNotice = {
+      id: TurnItemId.make("claude-pause"),
+      threadId: v2Projection.thread.id,
+      runId: failed.id,
+      nodeId: failed.rootNodeId,
+      providerThreadId: null,
+      providerTurnId,
+      nativeItemRef: {
+        driver: ProviderDriverKind.make("claudeAgent"),
+        nativeId: `usage-limit:${providerTurnId}:1`,
+        strength: "strong" as const,
+      },
+      parentItemId: null,
+      ordinal: 2,
+      type: "system_notice" as const,
+      status: "completed" as const,
+      title: "Usage limit",
+      startedAt: now,
+      completedAt: now,
+      updatedAt: now,
+      message: "Paused until reset",
+    };
+    const projection = {
+      ...v2Projection,
+      runs: [failed],
+      turnItems: [errorItem, claudePauseNotice],
+    };
+    const noticeRows = deriveUsageLimitNoticeRows(projection);
+    expect(noticeRows?.itemIds.has(errorItem.id)).toBe(false);
+    expect(noticeRows?.itemIds.has(claudePauseNotice.id)).toBe(true);
   });
 });

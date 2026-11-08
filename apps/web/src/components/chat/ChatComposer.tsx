@@ -242,10 +242,10 @@ import { observeResize } from "~/lib/observeResize";
 
 const isEnvironmentRequestInvalidError = Schema.is(EnvironmentRequestInvalidError);
 import { toastManager } from "../ui/toast";
-import { BuildingIcon, ChevronDownIcon, ChevronUpIcon, PlayIcon } from "lucide-react";
+import { BuildingIcon, PlayIcon, SlidersHorizontalIcon } from "lucide-react";
+import { BookPinIcon } from "../Icons";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { ComposerControl } from "./ComposerControl";
 import { useManagedPolicy } from "../../state/managedPolicy";
 import { proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
 import { hasProviderSetup } from "./ProviderStatusBanner";
@@ -3706,54 +3706,46 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               </div>
             ) : null}
 
-            {isComposerCollapsedMobile && speechInput.state.phase === "idle" ? null : (
-              <ComposerPinnedModelsRow
-                environmentId={environmentId}
-                planModeEnabled={settings.planModeEnabled}
-                showProviderUnavailable={showProviderUnavailable}
-                providerCatalogPending={providerCatalogPending}
-                isSendBusy={isSendBusy}
-                canSubmit={
-                  canOperateThread &&
-                  environmentUnavailable === null &&
-                  !projectSelectionRequired &&
-                  !isSendBusy &&
-                  activePendingProgress === null &&
-                  attachmentBlockReason === null &&
-                  runtimeModeCeilingDenial === undefined &&
-                  externalSendDisabledReason === null &&
-                  !speechInput.preparing &&
-                  (composerSendState.hasSendableContent ||
-                    voiceInputActive ||
-                    (pendingUserInputs.length === 0 && showPlanFollowUpPrompt))
-                }
-                providerInstanceEntries={providerInstanceEntries}
-                modelOptionsByInstance={modelOptionsByInstance}
-                getModelDisabledReason={getModelDisabledReason}
-                onSubmitWithPin={handleSubmitWithPinnedModelStable}
-                filter="default-label"
-                className={cn(
-                  pendingUserInputs.length > 0 && "pt-2",
-                  showMobilePendingAnswerActions &&
-                    speechInput.state.phase === "idle" &&
-                    "hidden sm:flex",
-                )}
-              />
-            )}
-
             {isComposerCollapsedMobile && speechInput.state.phase === "idle"
               ? null
               : (() => {
-                  const hasNicknamedPins =
+                  const hasPinnedModels =
                     !showProviderUnavailable &&
-                    settings.pins.some(
-                      (pin) =>
-                        Boolean(pin.label) &&
-                        providerInstanceEntries.some((entry) => entry.instanceId === pin.provider),
+                    settings.pins.some((pin) =>
+                      providerInstanceEntries.some((entry) => entry.instanceId === pin.provider),
                     );
-                  const showCustomControlsInBottomRow = !hasNicknamedPins;
-                  const showExpandedCustomControlsAbove =
-                    hasNicknamedPins && isComposerCustomModelExpanded;
+                  const showCustomControlsInBottomRow =
+                    !hasPinnedModels || isComposerCustomModelExpanded;
+                  const modeSwapLabel = showCustomControlsInBottomRow
+                    ? "Pinned models"
+                    : "Custom model";
+                  const modeSwapButton = hasPinnedModels ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={modeSwapLabel}
+                            data-chat-model-pins-expand="true"
+                            onPointerDown={(event) => event.preventDefault()}
+                            onClick={() =>
+                              setIsComposerCustomModelExpanded((expanded) => !expanded)
+                            }
+                            className="shrink-0"
+                          />
+                        }
+                      >
+                        {showCustomControlsInBottomRow ? (
+                          <BookPinIcon aria-hidden="true" />
+                        ) : (
+                          <SlidersHorizontalIcon aria-hidden="true" />
+                        )}
+                      </TooltipTrigger>
+                      <TooltipPopup side="top">{modeSwapLabel}</TooltipPopup>
+                    </Tooltip>
+                  ) : null;
                   const customModelAndSubmitActions = (
                     <div
                       data-chat-composer-actions="right"
@@ -3761,7 +3753,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       data-chat-composer-primary-actions-compact={
                         isComposerPrimaryActionsCompact ? "true" : "false"
                       }
-                      className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-2"
+                      className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5"
                     >
                       <div
                         ref={attachExpandedComposerControls}
@@ -3834,150 +3826,98 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           ? { onCompactContext: compactThreadContextStable }
                           : {})}
                       />
+                      {modeSwapButton}
                     </div>
                   );
-                  const expandToggleLabel = isComposerCustomModelExpanded
-                    ? "Hide model settings"
-                    : "More model settings";
                   return (
-                    <>
-                      {showExpandedCustomControlsAbove ? (
-                        <div
-                          data-chat-composer-expanded-controls="true"
-                          className={cn(
-                            "flex min-w-0 flex-nowrap items-center justify-end overflow-visible px-2 pb-1.5",
-                            pendingUserInputs.length > 0 && "pt-2",
-                            showMobilePendingAnswerActions &&
-                              speechInput.state.phase === "idle" &&
-                              "hidden sm:flex",
-                          )}
-                        >
-                          {customModelAndSubmitActions}
+                    <div
+                      data-chat-composer-footer="true"
+                      className={cn(
+                        "flex min-w-0 flex-nowrap items-center overflow-visible px-2 pb-2",
+                        pendingUserInputs.length > 0 && "pt-2",
+                        showMobilePendingAnswerActions &&
+                          speechInput.state.phase === "idle" &&
+                          "hidden sm:flex",
+                      )}
+                    >
+                      {composerAttachButton || speechInput.available ? (
+                        <div className="me-2 flex shrink-0 items-center gap-0.5">
+                          {composerAttachButton}
+                          {speechInput.available ? (
+                            <>
+                              <ComposerSpeechRecordingPill
+                                state={speechInput.state}
+                                progress={null}
+                                finishShortcutLabel={dictationShortcutLabel}
+                                cancelShortcutLabel="Esc"
+                                level={speechInput.level}
+                                disabled={dictationDisabled}
+                                onStart={() => void speechInput.start()}
+                                onStop={() => void speechInput.stop()}
+                                onCancel={() => speechInput.cancel()}
+                                onSkipPostProcessing={() => speechInput.skipPostProcessing()}
+                              />
+                              <ComposerSpeechButton
+                                state={speechInput.state}
+                                progress={null}
+                                shortcutLabel={dictationShortcutLabel}
+                                disabled={dictationDisabled}
+                                onStart={() => void speechInput.start()}
+                                onCancel={() => speechInput.cancel()}
+                              />
+                            </>
+                          ) : null}
                         </div>
                       ) : null}
-                      <div
-                        data-chat-composer-footer="true"
-                        className={cn(
-                          "flex min-w-0 flex-nowrap items-center overflow-visible px-2 pb-2",
-                          pendingUserInputs.length > 0 &&
-                            !showExpandedCustomControlsAbove &&
-                            "pt-2",
-                          showMobilePendingAnswerActions &&
-                            speechInput.state.phase === "idle" &&
-                            "hidden sm:flex",
-                        )}
-                      >
-                        {composerAttachButton || speechInput.available ? (
-                          <div className="me-2 flex shrink-0 items-center gap-0.5">
-                            {composerAttachButton}
-                            {speechInput.available ? (
-                              <>
-                                <ComposerSpeechRecordingPill
-                                  state={speechInput.state}
-                                  progress={null}
-                                  finishShortcutLabel={dictationShortcutLabel}
-                                  cancelShortcutLabel="Esc"
-                                  level={speechInput.level}
-                                  disabled={dictationDisabled}
-                                  onStart={() => void speechInput.start()}
-                                  onStop={() => void speechInput.stop()}
-                                  onCancel={() => speechInput.cancel()}
-                                  onSkipPostProcessing={() => speechInput.skipPostProcessing()}
-                                />
-                                <ComposerSpeechButton
-                                  state={speechInput.state}
-                                  progress={null}
-                                  shortcutLabel={dictationShortcutLabel}
-                                  disabled={dictationDisabled}
-                                  onStart={() => void speechInput.start()}
-                                  onCancel={() => speechInput.cancel()}
-                                />
-                              </>
-                            ) : null}
-                          </div>
-                        ) : null}
-                        <VoiceInputSetup
-                          environmentId={speechInput.transcriptionEnvironmentId}
-                          open={speechInput.setup.open}
-                          step={speechInput.setup.step}
-                          status={speechInput.status}
-                          model={speechInput.setup.model}
-                          language={speechInput.setup.language}
-                          downloading={speechInput.setup.downloading}
-                          error={speechInput.setup.error}
-                          onOpenChange={speechInput.setup.setOpen}
-                          onRetryCatalog={speechInput.setup.retryCatalog}
-                          onDownload={() => void speechInput.setup.download()}
-                          onCancelDownload={() => void speechInput.setup.cancelDownload()}
-                          onStartRecording={() => void speechInput.setup.startRecording()}
-                        />
-                        {showCustomControlsInBottomRow ? (
-                          customModelAndSubmitActions
-                        ) : (
-                          <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
-                            <ComposerPinnedModelsRow
-                              environmentId={environmentId}
-                              planModeEnabled={settings.planModeEnabled}
-                              showProviderUnavailable={showProviderUnavailable}
-                              providerCatalogPending={providerCatalogPending}
-                              isSendBusy={isSendBusy}
-                              canSubmit={
-                                canOperateThread &&
-                                environmentUnavailable === null &&
-                                !projectSelectionRequired &&
-                                !isSendBusy &&
-                                activePendingProgress === null &&
-                                attachmentBlockReason === null &&
-                                runtimeModeCeilingDenial === undefined &&
-                                externalSendDisabledReason === null &&
-                                !speechInput.preparing &&
-                                (composerSendState.hasSendableContent ||
-                                  voiceInputActive ||
-                                  (pendingUserInputs.length === 0 && showPlanFollowUpPrompt))
-                              }
-                              providerInstanceEntries={providerInstanceEntries}
-                              modelOptionsByInstance={modelOptionsByInstance}
-                              getModelDisabledReason={getModelDisabledReason}
-                              onSubmitWithPin={handleSubmitWithPinnedModelStable}
-                              filter="custom-label"
-                              inline
-                              trailingAccessory={
-                                <Tooltip>
-                                  <TooltipTrigger
-                                    render={
-                                      <ComposerControl
-                                        type="button"
-                                        size="sm"
-                                        aria-expanded={isComposerCustomModelExpanded}
-                                        aria-label={expandToggleLabel}
-                                        data-chat-model-pins-expand="true"
-                                        onClick={() =>
-                                          setIsComposerCustomModelExpanded((expanded) => !expanded)
-                                        }
-                                        className="shrink-0 px-1.5"
-                                      />
-                                    }
-                                  >
-                                    {isComposerCustomModelExpanded ? (
-                                      <ChevronDownIcon
-                                        aria-hidden="true"
-                                        className="size-3.5 sm:size-3"
-                                      />
-                                    ) : (
-                                      <ChevronUpIcon
-                                        aria-hidden="true"
-                                        className="size-3.5 sm:size-3"
-                                      />
-                                    )}
-                                  </TooltipTrigger>
-                                  <TooltipPopup side="top">{expandToggleLabel}</TooltipPopup>
-                                </Tooltip>
-                              }
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </>
+                      <VoiceInputSetup
+                        environmentId={speechInput.transcriptionEnvironmentId}
+                        open={speechInput.setup.open}
+                        step={speechInput.setup.step}
+                        status={speechInput.status}
+                        model={speechInput.setup.model}
+                        language={speechInput.setup.language}
+                        downloading={speechInput.setup.downloading}
+                        error={speechInput.setup.error}
+                        onOpenChange={speechInput.setup.setOpen}
+                        onRetryCatalog={speechInput.setup.retryCatalog}
+                        onDownload={() => void speechInput.setup.download()}
+                        onCancelDownload={() => void speechInput.setup.cancelDownload()}
+                        onStartRecording={() => void speechInput.setup.startRecording()}
+                      />
+                      {showCustomControlsInBottomRow ? (
+                        customModelAndSubmitActions
+                      ) : (
+                        <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+                          <ComposerPinnedModelsRow
+                            environmentId={environmentId}
+                            planModeEnabled={settings.planModeEnabled}
+                            showProviderUnavailable={showProviderUnavailable}
+                            providerCatalogPending={providerCatalogPending}
+                            isSendBusy={isSendBusy}
+                            canSubmit={
+                              canOperateThread &&
+                              environmentUnavailable === null &&
+                              !projectSelectionRequired &&
+                              !isSendBusy &&
+                              activePendingProgress === null &&
+                              attachmentBlockReason === null &&
+                              runtimeModeCeilingDenial === undefined &&
+                              externalSendDisabledReason === null &&
+                              !speechInput.preparing &&
+                              (composerSendState.hasSendableContent ||
+                                voiceInputActive ||
+                                (pendingUserInputs.length === 0 && showPlanFollowUpPrompt))
+                            }
+                            providerInstanceEntries={providerInstanceEntries}
+                            modelOptionsByInstance={modelOptionsByInstance}
+                            getModelDisabledReason={getModelDisabledReason}
+                            onSubmitWithPin={handleSubmitWithPinnedModelStable}
+                            inline
+                            trailingAccessory={modeSwapButton}
+                          />
+                        </div>
+                      )}
+                    </div>
                   );
                 })()}
             {showInlineRestingControls ? (

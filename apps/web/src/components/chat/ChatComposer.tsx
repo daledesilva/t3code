@@ -3753,7 +3753,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       data-chat-composer-primary-actions-compact={
                         isComposerPrimaryActionsCompact ? "true" : "false"
                       }
-                      className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5"
+                      className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-2"
                     >
                       <div
                         ref={attachExpandedComposerControls}
@@ -3826,7 +3826,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           ? { onCompactContext: compactThreadContextStable }
                           : {})}
                       />
-                      {modeSwapButton}
                     </div>
                   );
                   return (
@@ -3840,7 +3839,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           "hidden sm:flex",
                       )}
                     >
-                      {composerAttachButton || speechInput.available ? (
+                      {composerAttachButton || speechInput.available || modeSwapButton ? (
                         <div className="me-2 flex shrink-0 items-center gap-0.5">
                           {composerAttachButton}
                           {speechInput.available ? (
@@ -3865,6 +3864,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 onStart={() => void speechInput.start()}
                                 onCancel={() => speechInput.cancel()}
                               />
+                            </>
+                          ) : null}
+                          {modeSwapButton ? (
+                            <>
+                              {composerAttachButton || speechInput.available ? (
+                                <div
+                                  aria-hidden="true"
+                                  className="mx-1 h-4 w-px shrink-0 bg-border/80"
+                                />
+                              ) : null}
+                              {modeSwapButton}
                             </>
                           ) : null}
                         </div>
@@ -3913,7 +3923,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             getModelDisabledReason={getModelDisabledReason}
                             onSubmitWithPin={handleSubmitWithPinnedModelStable}
                             inline
-                            trailingAccessory={modeSwapButton}
                           />
                         </div>
                       )}

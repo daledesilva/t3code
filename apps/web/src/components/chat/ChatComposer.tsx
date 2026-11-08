@@ -1063,6 +1063,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     phase: "waiting" | "entering";
   } | null>(null);
   const pendingPinnedModelTimerRef = useRef<number | null>(null);
+  const [isPinnedModelsRowWrapped, setIsPinnedModelsRowWrapped] = useState(false);
+  const composerFooterRef = useRef<HTMLDivElement | null>(null);
+  const composerLeftActionsRef = useRef<HTMLDivElement | null>(null);
   const isMobileViewport = useMediaQuery("max-sm");
   const isSoftwareKeyboardOpen = useSoftwareKeyboardOpen();
   const [isComposerFocused, setIsComposerFocused] = useState(false);
@@ -1576,6 +1579,39 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setIsComposerPrimaryActionsCompact(measurePrimaryActionsCompact());
     });
   }, [composerFooterHasWideActions]);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes composer footer resizes to show a horizontal divider when pinned models wrap below the left actions
+  useLayoutEffect(() => {
+    const footer = composerFooterRef.current;
+    const leftActions = composerLeftActionsRef.current;
+    const pinsRow = footer?.querySelector<HTMLElement>('[data-chat-model-pins="true"]');
+    if (!footer || !leftActions || !pinsRow) {
+      setIsPinnedModelsRowWrapped(false);
+      return;
+    }
+    const measureWrapped = () =>
+      pinsRow.offsetTop >= leftActions.offsetTop + leftActions.offsetHeight / 2;
+    setIsPinnedModelsRowWrapped(measureWrapped());
+    const stopFooter = observeResize(footer, () => {
+      setIsPinnedModelsRowWrapped(measureWrapped());
+    });
+    const stopPins = observeResize(pinsRow, () => {
+      setIsPinnedModelsRowWrapped(measureWrapped());
+    });
+    return () => {
+      stopFooter();
+      stopPins();
+    };
+  }, [
+    isComposerCollapsedMobile,
+    isComposerCustomModelExpanded,
+    pendingPinnedModel,
+    providerInstanceEntries,
+    settings.pins,
+    showProviderUnavailable,
+    speechInput.available,
+    speechInput.state.phase,
+  ]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads draft images as data URLs and persists them to the draft store, dropping stale results on cleanup
   useEffect(() => {
@@ -3850,6 +3886,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   );
                   return (
                     <div
+                      ref={composerFooterRef}
                       data-chat-composer-footer="true"
                       className={cn(
                         "flex min-w-0 items-center overflow-visible px-2 pb-2",
@@ -3861,7 +3898,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       )}
                     >
                       {composerAttachButton || speechInput.available || modeSwapButton ? (
-                        <div className="me-2 flex shrink-0 items-center gap-0.5">
+                        <div
+                          ref={composerLeftActionsRef}
+                          className={cn(
+                            "relative me-2 flex shrink-0 items-center gap-0.5",
+                            !showCustomControlsInBottomRow &&
+                              isPinnedModelsRowWrapped &&
+                              "pb-1.5 after:pointer-events-none after:absolute after:inset-x-1.5 after:bottom-0 after:h-px after:bg-border/80",
+                          )}
+                        >
                           {composerAttachButton}
                           {speechInput.available ? (
                             <>

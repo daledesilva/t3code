@@ -64,18 +64,8 @@ function StageBackdropArt({ variant }: { variant: SidebarStageBackdropVariant })
   return variant === "nightly" ? <NightlySkyArt /> : <DevBlueprintArt />;
 }
 
-export function StageBackdropButtonArt({
-  variant,
-  lightEdge = "end",
-}: {
-  variant: SidebarStageBackdropVariant;
-  lightEdge?: "start" | "end";
-}) {
-  return variant === "nightly" ? (
-    <NightlySkyArt compact lightEdge={lightEdge} />
-  ) : (
-    <DevBlueprintArt compact lightEdge={lightEdge} />
-  );
+export function StageBackdropButtonArt({ variant }: { variant: SidebarStageBackdropVariant }) {
+  return variant === "nightly" ? <NightlySkyArt compact /> : <DevBlueprintArt compact />;
 }
 
 const NIGHTLY_STARS: ReadonlyArray<{
@@ -109,13 +99,7 @@ const NIGHTLY_SPARKLES: ReadonlyArray<{ x: number; y: number }> = [
   { x: 246, y: 26 },
 ];
 
-function NightlySkyArt({
-  compact = false,
-  lightEdge = "end",
-}: {
-  compact?: boolean;
-  lightEdge?: "start" | "end";
-}) {
+function NightlySkyArt({ compact = false }: { compact?: boolean }) {
   const idPrefix = useId().replaceAll(":", "");
   const skyId = `${idPrefix}-stage-night-sky`;
   const glowId = `${idPrefix}-stage-night-glow`;
@@ -135,9 +119,7 @@ function NightlySkyArt({
         compact
           ? {
               background:
-                lightEdge === "start"
-                  ? "radial-gradient(80% 120% at 25% 20%, color-mix(in srgb, var(--stage-night-glow-highlight) 40%, transparent) 0%, color-mix(in srgb, var(--stage-night-glow-secondary) 16%, transparent) 50%, transparent 100%), linear-gradient(245deg, var(--stage-night-bottom) 0%, var(--stage-night-mid) 50%, var(--stage-night-top) 100%)"
-                  : "radial-gradient(80% 120% at 75% 20%, color-mix(in srgb, var(--stage-night-glow-highlight) 40%, transparent) 0%, color-mix(in srgb, var(--stage-night-glow-secondary) 16%, transparent) 50%, transparent 100%), linear-gradient(115deg, var(--stage-night-bottom) 0%, var(--stage-night-mid) 50%, var(--stage-night-top) 100%)",
+                "radial-gradient(2.25rem 120% at calc(100% - 0.5rem) 20%, color-mix(in srgb, var(--stage-night-glow-highlight) 40%, transparent) 0%, color-mix(in srgb, var(--stage-night-glow-secondary) 16%, transparent) 50%, transparent 100%), linear-gradient(to right, var(--stage-night-bottom) 0%, var(--stage-night-bottom) max(0%, calc(100% - 2.25rem)), var(--stage-night-mid) calc(100% - 1.125rem), var(--stage-night-top) 100%)",
             }
           : undefined
       }
@@ -237,13 +219,7 @@ function NightlySkyArt({
   );
 }
 
-function DevBlueprintArt({
-  compact = false,
-  lightEdge = "end",
-}: {
-  compact?: boolean;
-  lightEdge?: "start" | "end";
-}) {
+function DevBlueprintArt({ compact = false }: { compact?: boolean }) {
   const idPrefix = useId().replaceAll(":", "");
   const paperId = `${idPrefix}-stage-bp-paper`;
   const glowId = `${idPrefix}-stage-bp-glow`;
@@ -266,9 +242,7 @@ function DevBlueprintArt({
         compact
           ? {
               background:
-                lightEdge === "start"
-                  ? "radial-gradient(80% 120% at 25% 20%, color-mix(in srgb, var(--stage-art-highlight) 40%, transparent) 0%, color-mix(in srgb, var(--stage-art-secondary) 16%, transparent) 52%, transparent 100%), linear-gradient(245deg, var(--stage-art-bottom) 0%, var(--stage-art-mid) 50%, var(--stage-art-top) 100%)"
-                  : "radial-gradient(80% 120% at 75% 20%, color-mix(in srgb, var(--stage-art-highlight) 40%, transparent) 0%, color-mix(in srgb, var(--stage-art-secondary) 16%, transparent) 52%, transparent 100%), linear-gradient(115deg, var(--stage-art-bottom) 0%, var(--stage-art-mid) 50%, var(--stage-art-top) 100%)",
+                "radial-gradient(2.25rem 120% at calc(100% - 0.5rem) 20%, color-mix(in srgb, var(--stage-art-highlight) 40%, transparent) 0%, color-mix(in srgb, var(--stage-art-secondary) 16%, transparent) 52%, transparent 100%), linear-gradient(to right, var(--stage-art-bottom) 0%, var(--stage-art-bottom) max(0%, calc(100% - 2.25rem)), var(--stage-art-mid) calc(100% - 1.125rem), var(--stage-art-top) 100%)",
             }
           : undefined
       }

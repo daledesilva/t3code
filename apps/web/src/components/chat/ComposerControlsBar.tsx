@@ -224,8 +224,7 @@ export function ComposerPinnedModelsRow(props: {
     const showInstanceBadge = shouldShowInstanceBadge(entry, providerInstanceEntries);
     const pinKey = `${pin.provider}:${pin.model}:${JSON.stringify(pin.options ?? [])}`;
     const isRenaming = renamingPinKey === pinKey;
-    const pinEffortDetail = pinEffort.detail?.replaceAll(" \u00b7 ", " ") ?? null;
-    const submitTargetLabel = [triggerLabel, pinEffortDetail].filter(Boolean).join(" ");
+    const submitTargetLabel = [triggerLabel, pinEffort.detail].filter(Boolean).join(" \u00b7 ");
     const tooltipText = [`Submit with ${submitTargetLabel}`, disabledReason]
       .filter(Boolean)
       .join(" \u00b7 ");
@@ -265,7 +264,7 @@ export function ComposerPinnedModelsRow(props: {
           acpRegistryIconUrl={entry.acpRegistryIconUrl}
           showBadge={showInstanceBadge}
           className="size-4"
-          iconClassName="size-4"
+          iconClassName="size-4 fill-current! text-current! [&_path]:fill-current! [&_rect]:fill-current! [&_[data-icon-detail]]:fill-transparent! [&[data-provider-package-icon]_path:not([data-icon-detail])]:fill-current!"
           indicatorBackground="var(--message-action)"
           badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs"
         />
@@ -291,7 +290,7 @@ export function ComposerPinnedModelsRow(props: {
     );
     const backdropArt = stageBackdropVariant ? (
       <span className="pointer-events-none absolute inset-0 -z-10" aria-hidden="true">
-        <StageBackdropButtonArt variant={stageBackdropVariant} lightEdge="start" />
+        <StageBackdropButtonArt variant={stageBackdropVariant} />
       </span>
     ) : null;
     const toneClassName = stageBackdropVariant

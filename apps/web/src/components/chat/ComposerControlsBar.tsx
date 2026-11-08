@@ -433,9 +433,9 @@ function observePinnedModelsRowWrap(pinsRow: HTMLDivElement | null) {
   const syncWrapped = () => {
     const wrapped = pinsRow.offsetTop >= leftActions.offsetTop + leftActions.offsetHeight / 2;
     if (wrapped) {
-      leftActions.dataset.pinnedModelsWrapped = "true";
+      footer.dataset.pinnedModelsWrapped = "true";
     } else {
-      delete leftActions.dataset.pinnedModelsWrapped;
+      delete footer.dataset.pinnedModelsWrapped;
     }
   };
   syncWrapped();
@@ -446,7 +446,7 @@ function observePinnedModelsRowWrap(pinsRow: HTMLDivElement | null) {
     stopFooter();
     stopLeftActions();
     stopPins();
-    delete leftActions.dataset.pinnedModelsWrapped;
+    delete footer.dataset.pinnedModelsWrapped;
   };
 }
 

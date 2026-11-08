@@ -3852,8 +3852,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     <div
                       data-chat-composer-footer="true"
                       className={cn(
-                        "flex min-w-0 items-center overflow-visible px-2 pb-2",
-                        showCustomControlsInBottomRow ? "flex-nowrap" : "flex-wrap gap-y-1.5",
+                        "relative flex min-w-0 items-center overflow-visible px-2 pb-2",
+                        showCustomControlsInBottomRow
+                          ? "flex-nowrap"
+                          : "flex-wrap gap-y-1.5 data-[pinned-models-wrapped=true]:gap-y-3",
                         pendingUserInputs.length > 0 && "pt-2",
                         showMobilePendingAnswerActions &&
                           speechInput.state.phase === "idle" &&
@@ -3863,44 +3865,50 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       {composerAttachButton || speechInput.available || modeSwapButton ? (
                         <div
                           data-chat-composer-left-actions="true"
-                          className="relative me-2 flex shrink-0 items-center gap-0.5 data-[pinned-models-wrapped=true]:pb-1.5 data-[pinned-models-wrapped=true]:after:pointer-events-none data-[pinned-models-wrapped=true]:after:absolute data-[pinned-models-wrapped=true]:after:inset-x-1.5 data-[pinned-models-wrapped=true]:after:bottom-0 data-[pinned-models-wrapped=true]:after:h-px data-[pinned-models-wrapped=true]:after:bg-border/80"
+                          className="me-2 flex shrink-0 flex-col"
                         >
-                          {composerAttachButton}
-                          {speechInput.available ? (
-                            <>
-                              <ComposerSpeechRecordingPill
-                                state={speechInput.state}
-                                progress={null}
-                                finishShortcutLabel={dictationShortcutLabel}
-                                cancelShortcutLabel="Esc"
-                                level={speechInput.level}
-                                disabled={dictationDisabled}
-                                onStart={() => void speechInput.start()}
-                                onStop={() => void speechInput.stop()}
-                                onCancel={() => speechInput.cancel()}
-                                onSkipPostProcessing={() => speechInput.skipPostProcessing()}
-                              />
-                              <ComposerSpeechButton
-                                state={speechInput.state}
-                                progress={null}
-                                shortcutLabel={dictationShortcutLabel}
-                                disabled={dictationDisabled}
-                                onStart={() => void speechInput.start()}
-                                onCancel={() => speechInput.cancel()}
-                              />
-                            </>
-                          ) : null}
-                          {modeSwapButton ? (
-                            <>
-                              {composerAttachButton || speechInput.available ? (
-                                <div
-                                  aria-hidden="true"
-                                  className="mx-1 h-4 w-px shrink-0 bg-border/80"
+                          <div className="flex items-center gap-0.5 in-data-[pinned-models-wrapped=true]:mb-1.5">
+                            {composerAttachButton}
+                            {speechInput.available ? (
+                              <>
+                                <ComposerSpeechRecordingPill
+                                  state={speechInput.state}
+                                  progress={null}
+                                  finishShortcutLabel={dictationShortcutLabel}
+                                  cancelShortcutLabel="Esc"
+                                  level={speechInput.level}
+                                  disabled={dictationDisabled}
+                                  onStart={() => void speechInput.start()}
+                                  onStop={() => void speechInput.stop()}
+                                  onCancel={() => speechInput.cancel()}
+                                  onSkipPostProcessing={() => speechInput.skipPostProcessing()}
                                 />
-                              ) : null}
-                              {modeSwapButton}
-                            </>
-                          ) : null}
+                                <ComposerSpeechButton
+                                  state={speechInput.state}
+                                  progress={null}
+                                  shortcutLabel={dictationShortcutLabel}
+                                  disabled={dictationDisabled}
+                                  onStart={() => void speechInput.start()}
+                                  onCancel={() => speechInput.cancel()}
+                                />
+                              </>
+                            ) : null}
+                            {modeSwapButton ? (
+                              <>
+                                {composerAttachButton || speechInput.available ? (
+                                  <div
+                                    aria-hidden="true"
+                                    className="mx-1 h-4 w-px shrink-0 bg-border/80"
+                                  />
+                                ) : null}
+                                {modeSwapButton}
+                              </>
+                            ) : null}
+                          </div>
+                          <div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute inset-x-3.5 hidden h-px bg-border/80 in-data-[pinned-models-wrapped=true]:block"
+                          />
                         </div>
                       ) : null}
                       <VoiceInputSetup

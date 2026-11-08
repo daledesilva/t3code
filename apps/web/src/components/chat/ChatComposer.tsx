@@ -3852,7 +3852,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     <div
                       data-chat-composer-footer="true"
                       className={cn(
-                        "flex min-w-0 flex-nowrap items-center overflow-visible px-2 pb-2",
+                        "flex min-w-0 items-center overflow-visible px-2 pb-2",
+                        showCustomControlsInBottomRow ? "flex-nowrap" : "flex-wrap gap-y-1.5",
                         pendingUserInputs.length > 0 && "pt-2",
                         showMobilePendingAnswerActions &&
                           speechInput.state.phase === "idle" &&
@@ -3917,36 +3918,35 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       {showCustomControlsInBottomRow ? (
                         customModelAndSubmitActions
                       ) : (
-                        <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
-                          <ComposerPinnedModelsRow
-                            environmentId={environmentId}
-                            planModeEnabled={settings.planModeEnabled}
-                            showProviderUnavailable={showProviderUnavailable}
-                            providerCatalogPending={providerCatalogPending}
-                            isSendBusy={isSendBusy}
-                            canSubmit={
-                              canOperateThread &&
-                              environmentUnavailable === null &&
-                              !projectSelectionRequired &&
-                              !isSendBusy &&
-                              activePendingProgress === null &&
-                              attachmentBlockReason === null &&
-                              runtimeModeCeilingDenial === undefined &&
-                              externalSendDisabledReason === null &&
-                              !speechInput.preparing &&
-                              (composerSendState.hasSendableContent ||
-                                voiceInputActive ||
-                                (pendingUserInputs.length === 0 && showPlanFollowUpPrompt))
-                            }
-                            providerInstanceEntries={providerInstanceEntries}
-                            modelOptionsByInstance={modelOptionsByInstance}
-                            getModelDisabledReason={getModelDisabledReason}
-                            onSubmitWithPin={handleSubmitWithPinnedModelStable}
-                            pendingPinnedModel={pendingPinnedModel}
-                            onPendingPinnedModelEntered={() => setPendingPinnedModel(null)}
-                            inline
-                          />
-                        </div>
+                        <ComposerPinnedModelsRow
+                          environmentId={environmentId}
+                          planModeEnabled={settings.planModeEnabled}
+                          showProviderUnavailable={showProviderUnavailable}
+                          providerCatalogPending={providerCatalogPending}
+                          isSendBusy={isSendBusy}
+                          canSubmit={
+                            canOperateThread &&
+                            environmentUnavailable === null &&
+                            !projectSelectionRequired &&
+                            !isSendBusy &&
+                            activePendingProgress === null &&
+                            attachmentBlockReason === null &&
+                            runtimeModeCeilingDenial === undefined &&
+                            externalSendDisabledReason === null &&
+                            !speechInput.preparing &&
+                            (composerSendState.hasSendableContent ||
+                              voiceInputActive ||
+                              (pendingUserInputs.length === 0 && showPlanFollowUpPrompt))
+                          }
+                          providerInstanceEntries={providerInstanceEntries}
+                          modelOptionsByInstance={modelOptionsByInstance}
+                          getModelDisabledReason={getModelDisabledReason}
+                          onSubmitWithPin={handleSubmitWithPinnedModelStable}
+                          pendingPinnedModel={pendingPinnedModel}
+                          onPendingPinnedModelEntered={() => setPendingPinnedModel(null)}
+                          inline
+                          className="ms-auto"
+                        />
                       )}
                     </div>
                   );

@@ -6,6 +6,7 @@ import { CircleAlertIcon, PinIcon } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   useRef,
   useState,
 } from "react";
@@ -127,6 +128,9 @@ export function ComposerPinnedModelsRow(props: {
     resolvedSlug: string,
     event: ReactMouseEvent<HTMLButtonElement>,
   ) => void;
+  filter?: "all" | "custom-label" | "default-label";
+  inline?: boolean;
+  trailingAccessory?: ReactNode;
   className?: string;
 }) {
   const {
@@ -140,6 +144,9 @@ export function ComposerPinnedModelsRow(props: {
     modelOptionsByInstance,
     getModelDisabledReason,
     onSubmitWithPin,
+    filter = "all",
+    inline = false,
+    trailingAccessory,
   } = props;
   const { pins } = useEnvironmentModelPreferences(environmentId);
   const togglePin = useToggleEnvironmentModelPin(environmentId);
@@ -169,7 +176,13 @@ export function ComposerPinnedModelsRow(props: {
     })();
   };
 
-  const pinnedModelButtons = pins.flatMap((pin) => {
+  const filteredPins = pins.filter((pin) => {
+    if (filter === "custom-label") return Boolean(pin.label);
+    if (filter === "default-label") return !pin.label;
+    return true;
+  });
+
+  const pinnedModelButtons = filteredPins.flatMap((pin) => {
     const entry = providerInstanceEntries.find(
       (candidate) => candidate.instanceId === pin.provider,
     );
@@ -371,11 +384,14 @@ export function ComposerPinnedModelsRow(props: {
     <div
       data-chat-model-pins="true"
       className={cn(
-        "flex min-w-0 flex-wrap items-center justify-end gap-1.5 px-2 pb-1.5",
+        inline
+          ? "flex min-w-0 flex-wrap items-center justify-end gap-1.5"
+          : "flex min-w-0 flex-wrap items-center justify-end gap-1.5 px-2 pb-1.5",
         props.className,
       )}
     >
       {pinnedModelButtons}
+      {trailingAccessory}
     </div>
   );
 }

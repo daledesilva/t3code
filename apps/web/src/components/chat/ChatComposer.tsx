@@ -1058,6 +1058,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
   const [isComposerCustomModelExpanded, setIsComposerCustomModelExpanded] = useState(false);
+  const [pendingPinnedModel, setPendingPinnedModel] = useState<{
+    pin: ModelPin;
+    phase: "waiting" | "entering";
+  } | null>(null);
+  const pendingPinnedModelTimerRef = useRef<number | null>(null);
   const isMobileViewport = useMediaQuery("max-sm");
   const isSoftwareKeyboardOpen = useSoftwareKeyboardOpen();
   const [isComposerFocused, setIsComposerFocused] = useState(false);
@@ -2576,6 +2581,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onModelPickerOpenChange={setIsComposerModelPickerOpen}
       modelPickerIconClassName={composerProviderState.modelPickerIconClassName}
       getModelDisabledReason={getModelDisabledReason}
+      onPinModel={(pin) => {
+        if (pendingPinnedModelTimerRef.current !== null) {
+          window.clearTimeout(pendingPinnedModelTimerRef.current);
+        }
+        setIsComposerCustomModelExpanded(false);
+        setPendingPinnedModel({ pin, phase: "waiting" });
+        pendingPinnedModelTimerRef.current = window.setTimeout(() => {
+          pendingPinnedModelTimerRef.current = null;
+          setPendingPinnedModel((current) => (current ? { ...current, phase: "entering" } : null));
+        }, 250);
+      }}
     />
   );
   // An open question owns the space above the composer. Only a machine problem,
@@ -3711,9 +3727,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               : (() => {
                   const hasPinnedModels =
                     !showProviderUnavailable &&
-                    settings.pins.some((pin) =>
+                    (settings.pins.some((pin) =>
                       providerInstanceEntries.some((entry) => entry.instanceId === pin.provider),
-                    );
+                    ) ||
+                      (pendingPinnedModel !== null &&
+                        providerInstanceEntries.some(
+                          (entry) => entry.instanceId === pendingPinnedModel.pin.provider,
+                        )));
                   const showCustomControlsInBottomRow =
                     !hasPinnedModels || isComposerCustomModelExpanded;
                   const modeSwapLabel = showCustomControlsInBottomRow
@@ -3922,6 +3942,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             modelOptionsByInstance={modelOptionsByInstance}
                             getModelDisabledReason={getModelDisabledReason}
                             onSubmitWithPin={handleSubmitWithPinnedModelStable}
+                            pendingPinnedModel={pendingPinnedModel}
+                            onPendingPinnedModelEntered={() => setPendingPinnedModel(null)}
                             inline
                           />
                         </div>

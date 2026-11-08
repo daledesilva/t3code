@@ -128,6 +128,11 @@ export function ComposerPinnedModelsRow(props: {
     resolvedSlug: string,
     event: ReactMouseEvent<HTMLButtonElement>,
   ) => void;
+  pendingPinnedModel?: {
+    pin: ModelPin;
+    phase: "waiting" | "entering";
+  } | null;
+  onPendingPinnedModelEntered?: () => void;
   filter?: "all" | "custom-label" | "default-label";
   inline?: boolean;
   trailingAccessory?: ReactNode;
@@ -144,6 +149,8 @@ export function ComposerPinnedModelsRow(props: {
     modelOptionsByInstance,
     getModelDisabledReason,
     onSubmitWithPin,
+    pendingPinnedModel = null,
+    onPendingPinnedModelEntered,
     filter = "all",
     inline = false,
     trailingAccessory,
@@ -155,7 +162,7 @@ export function ComposerPinnedModelsRow(props: {
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const stageBackdropVariant = useSidebarStageBackdropVariant(environmentIdentificationMode);
 
-  if (showProviderUnavailable || pins.length === 0) {
+  if (showProviderUnavailable || (pins.length === 0 && !pendingPinnedModel)) {
     return null;
   }
 
@@ -182,7 +189,15 @@ export function ComposerPinnedModelsRow(props: {
     return true;
   });
 
-  const pinnedModelButtons = filteredPins.flatMap((pin) => {
+  const visiblePins =
+    pendingPinnedModel?.phase === "waiting"
+      ? filteredPins.filter((pin) => !modelPinsEqual(pin, pendingPinnedModel.pin))
+      : pendingPinnedModel?.phase === "entering" &&
+          !filteredPins.some((pin) => modelPinsEqual(pin, pendingPinnedModel.pin))
+        ? [...filteredPins, pendingPinnedModel.pin]
+        : filteredPins;
+
+  const pinnedModelButtons = visiblePins.flatMap((pin) => {
     const entry = providerInstanceEntries.find(
       (candidate) => candidate.instanceId === pin.provider,
     );
@@ -323,6 +338,8 @@ export function ComposerPinnedModelsRow(props: {
     }
     const isHardDisabled = providerCatalogPending || isSendBusy || Boolean(disabledReason);
     const isActionReady = !isHardDisabled && canSubmit;
+    const isEntering =
+      pendingPinnedModel?.phase === "entering" && modelPinsEqual(pin, pendingPinnedModel.pin);
     const button = (
       <button
         key={pinKey}
@@ -340,6 +357,12 @@ export function ComposerPinnedModelsRow(props: {
         }}
         onContextMenu={handleContextMenu}
         onKeyDown={handleKeyDown}
+        onTransitionEnd={isEntering ? () => onPendingPinnedModelEntered?.() : undefined}
+        style={
+          isEntering
+            ? { transitionTimingFunction: "cubic-bezier(0.215, 0.61, 0.355, 1)" }
+            : undefined
+        }
         className={cn(
           PINNED_MODEL_SUBMIT_PILL,
           toneClassName,
@@ -352,6 +375,8 @@ export function ComposerPinnedModelsRow(props: {
               )
             : "cursor-default opacity-64 shadow-none",
           "disabled:cursor-not-allowed disabled:opacity-64 disabled:shadow-none",
+          isEntering &&
+            "origin-center duration-200 ease-out starting:scale-80 starting:opacity-0 motion-reduce:transition-none motion-reduce:starting:scale-100 motion-reduce:starting:opacity-100",
         )}
       >
         {backdropArt}
@@ -376,7 +401,7 @@ export function ComposerPinnedModelsRow(props: {
     ];
   });
 
-  if (pinnedModelButtons.length === 0) {
+  if (pinnedModelButtons.length === 0 && !pendingPinnedModel) {
     return null;
   }
 
@@ -385,8 +410,8 @@ export function ComposerPinnedModelsRow(props: {
       data-chat-model-pins="true"
       className={cn(
         inline
-          ? "flex min-w-0 flex-wrap items-center justify-end gap-1.5"
-          : "flex min-w-0 flex-wrap items-center justify-end gap-1.5 px-2 pb-1.5",
+          ? "flex min-h-9 min-w-0 flex-wrap items-center justify-end gap-1.5 sm:min-h-8"
+          : "flex min-h-9 min-w-0 flex-wrap items-center justify-end gap-1.5 px-2 pb-1.5 sm:min-h-8",
         props.className,
       )}
     >
@@ -455,6 +480,7 @@ export function ComposerControlsBar(props: {
   onModelPickerOpenChange: (open: boolean) => void;
   modelPickerIconClassName: string | undefined;
   getModelDisabledReason: ChatComposerProps["getModelDisabledReason"];
+  onPinModel?: (pin: ModelPin) => void;
 }) {
   const {
     environmentId,
@@ -503,6 +529,7 @@ export function ComposerControlsBar(props: {
     onModelPickerOpenChange,
     modelPickerIconClassName,
     getModelDisabledReason,
+    onPinModel,
   } = props;
   const { pins } = useEnvironmentModelPreferences(environmentId);
   const togglePin = useToggleEnvironmentModelPin(environmentId);
@@ -663,6 +690,9 @@ export function ComposerControlsBar(props: {
               disabled={pinTriggerDisabled}
               onClick={() => {
                 if (!currentPinCandidate) return;
+                if (!isCurrentModelPinned) {
+                  onPinModel?.(currentPinCandidate);
+                }
                 void togglePin(
                   currentPinCandidate.provider,
                   currentPinCandidate.model,

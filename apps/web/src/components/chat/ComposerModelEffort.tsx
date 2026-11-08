@@ -4,10 +4,25 @@ import {
   isReasoningControl,
   selectableProviderOptionChoices,
 } from "@t3tools/client-runtime/model-traits";
-import type { ProviderOptionDescriptor, RuntimeMode } from "@t3tools/contracts";
+import type {
+  ModelSelection,
+  ProviderDriverKind,
+  ProviderOptionDescriptor,
+  ProviderOptionSelection,
+  RuntimeMode,
+} from "@t3tools/contracts";
 import type { EffortDisplay } from "@t3tools/contracts/settings";
 import { getProviderOptionCurrentLabel } from "@t3tools/shared/model";
-import { CheckIcon, ChevronRightIcon, ChevronUpIcon, WorkflowIcon } from "lucide-react";
+import {
+  BrainIcon,
+  CheckIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  GaugeIcon,
+  LayersIcon,
+  SparklesIcon,
+  WorkflowIcon,
+} from "lucide-react";
 import { type KeyboardEvent, type ReactNode, use, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
@@ -59,6 +74,59 @@ function splitSpeed(
   };
 }
 
+export function resolveModelSpeedMode(input: {
+  provider: ProviderDriverKind;
+  descriptors: ReadonlyArray<ProviderOptionDescriptor>;
+  modelSelection?: ModelSelection | null;
+  reportedModelSelection?: ModelSelection | null | undefined;
+}): {
+  option: ProviderOptionSelection;
+  label: "Standard" | "Fast" | "Ultrafast";
+} | null {
+  const selectDescriptors = input.descriptors.filter(
+    (descriptor): descriptor is SelectDescriptor => descriptor.type === "select",
+  );
+  const booleanDescriptors = input.descriptors.filter(
+    (descriptor): descriptor is BooleanDescriptor => descriptor.type === "boolean",
+  );
+  const { speedSelect, fastToggle } = splitSpeed(
+    input.provider,
+    selectDescriptors,
+    booleanDescriptors,
+  );
+  if (fastToggle) {
+    const isFast = fastToggle.currentValue === true;
+    return {
+      option: { id: fastToggle.id, value: isFast },
+      label: isFast ? "Fast" : "Standard",
+    };
+  }
+  if (speedSelect) {
+    const choices = selectableProviderOptionChoices(speedSelect);
+    const supportsSpeedModes = choices.some(
+      (choice) =>
+        choice.id === "fast" ||
+        choice.id === "ultrafast" ||
+        choice.label === "Fast" ||
+        choice.label === "Ultrafast",
+    );
+    if (!supportsSpeedModes) return null;
+    const rawValue =
+      getDescriptorStringValue(
+        speedSelect,
+        input.modelSelection ?? null,
+        input.reportedModelSelection,
+      ) ?? "default";
+    const label =
+      rawValue === "ultrafast" ? "Ultrafast" : rawValue === "fast" ? "Fast" : "Standard";
+    return {
+      option: { id: speedSelect.id, value: rawValue },
+      label,
+    };
+  }
+  return null;
+}
+
 type ColumnControl =
   | { kind: "select"; descriptor: SelectDescriptor }
   | { kind: "boolean"; descriptor: BooleanDescriptor };
@@ -83,8 +151,8 @@ function columnControls(
 
 /**
  * What the model trigger shows after the model name: the effort word (or bars, per the
- * Appearance setting), a bolt for Fast, a workflow icon for Ultracode, and other traits such as a
- * context window.
+ * Appearance setting), a bolt for Fast, a workflow icon for Ultracode, and other traits
+ * such as a context window.
  */
 export function describeComposerEffort(
   traits: TraitsSelectionInput | null,
@@ -178,6 +246,88 @@ export function describeComposerEffort(
   };
 }
 
+/**
+ * Icon-only traits summary for pinned model submit buttons: effort bars or icon, Fast bolt
+ * when applied (never Standard), Ultracode workflow icon, and context window icon.
+ */
+export function describePinnedModelEffort(
+  traits: TraitsSelectionInput | null,
+  size: ComposerControlSize,
+): { suffix: ReactNode; detail: string | null } {
+  if (!traits) return { suffix: null, detail: null };
+  const visibility = getTraitsSectionVisibility(traits);
+  if (!visibility.hasAnyControls) return { suffix: null, detail: null };
+  const modelSelection =
+    traits.instanceId && traits.model
+      ? { instanceId: traits.instanceId, model: traits.model, options: traits.modelOptions ?? [] }
+      : null;
+  const primary = visibility.primarySelectDescriptor;
+  const display = buildTraitsTriggerDisplay({
+    provider: traits.provider,
+    descriptors: visibility.descriptors,
+    primarySelectDescriptorId: primary?.id ?? null,
+    ultrathinkPromptControlled: visibility.ultrathinkPromptControlled,
+    modelSelection,
+    reportedModelSelection: traits.reportedModelSelection,
+  });
+  const reasoning =
+    columnControls(traits.provider, visibility.selectDescriptors, visibility.booleanDescriptors)
+      .effort?.descriptor ?? null;
+  const ultrathink = visibility.ultrathinkPromptControlled && reasoning === primary;
+  const glyph =
+    reasoning?.type === "select"
+      ? resolveEffortGlyph(
+          reasoning,
+          ultrathink
+            ? "ultrathink"
+            : getDescriptorStringValue(reasoning, modelSelection, traits.reportedModelSelection),
+        )
+      : null;
+  const reasoningIcon =
+    glyph && !glyph.special ? (
+      glyph.filled > 0 ? (
+        <EffortGlyph count={glyph.count} filled={glyph.filled} size={size} />
+      ) : null
+    ) : glyph?.special === "Ultracode" ? (
+      <WorkflowIcon aria-hidden="true" data-composer-control-icon className="size-3" />
+    ) : glyph?.special || ultrathink ? (
+      <SparklesIcon aria-hidden="true" data-composer-control-icon className="size-3" />
+    ) : reasoning?.type === "boolean" ? (
+      reasoning.currentValue === true ? (
+        <BrainIcon aria-hidden="true" data-composer-control-icon className="size-3" />
+      ) : null
+    ) : reasoning?.type === "select" &&
+      getProviderOptionCurrentLabel(reasoning, modelSelection, traits.reportedModelSelection) ? (
+      <GaugeIcon aria-hidden="true" data-composer-control-icon className="size-3" />
+    ) : null;
+  const fast = display.speedLabel === "Fast" || display.speedLabel === "Ultrafast";
+  const contextWindow =
+    visibility.contextWindowDescriptor &&
+    getProviderOptionCurrentLabel(
+      visibility.contextWindowDescriptor,
+      modelSelection,
+      traits.reportedModelSelection,
+    );
+  if (!reasoningIcon && !fast && !display.ultracode && !contextWindow) {
+    return { suffix: null, detail: display.label };
+  }
+  return {
+    detail: display.label,
+    suffix: (
+      <span className="flex shrink-0 items-center gap-1 text-current/90 group-hover/model-trigger:text-current">
+        {reasoningIcon}
+        {fast ? <FastBolt ultra={display.speedLabel === "Ultrafast"} /> : null}
+        {display.ultracode ? (
+          <WorkflowIcon aria-hidden="true" data-composer-control-icon className="size-3" />
+        ) : null}
+        {contextWindow ? (
+          <LayersIcon aria-hidden="true" data-composer-control-icon className="size-3" />
+        ) : null}
+      </span>
+    ),
+  };
+}
+
 const COLUMN_ROW =
   "flex h-8 w-full shrink-0 cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-sm text-foreground outline-none hover:bg-foreground/[0.09] focus-visible:bg-foreground/[0.09] disabled:cursor-not-allowed disabled:opacity-64";
 const COLUMN_LABEL = "px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs";
@@ -208,13 +358,16 @@ function ColumnRow(props: {
   } as const;
   const content = (
     <>
-      <span className="min-w-0 flex-1 truncate">{props.label}</span>
-      {props.selected ? (
-        <>
-          {props.isDefault ? <span className="sr-only">Default</span> : null}
-          <CheckIcon aria-hidden="true" className="size-3.5" />
-        </>
-      ) : props.isDefault ? (
+      <span className="flex min-w-0 flex-1 items-center gap-2 text-left">
+        <span className="min-w-0 truncate">{props.label}</span>
+        {props.selected ? (
+          <>
+            {props.isDefault ? <span className="sr-only">Default</span> : null}
+            <CheckIcon aria-hidden="true" className="size-3.5 shrink-0" />
+          </>
+        ) : null}
+      </span>
+      {!props.selected && props.isDefault ? (
         <span className="text-muted-foreground/70 text-xs">Default</span>
       ) : null}
     </>

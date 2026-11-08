@@ -8,6 +8,7 @@ import {
   type EnvironmentId,
   type ProviderInstanceMutation,
   type ProviderInstanceId,
+  type ProviderOptionSelection,
   ServerSettings,
   type ServerSettingsPatch,
   sessionGrantsScope,
@@ -17,6 +18,7 @@ import {
   type ClientSettings,
   DEFAULT_CLIENT_SETTINGS,
   type EnvironmentIdentificationMode,
+  type ModelPin,
   type UnifiedSettings,
 } from "@t3tools/contracts/settings";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
@@ -39,6 +41,7 @@ import {
   themeAllowsSidebarArtwork,
 } from "~/themePalette";
 import {
+  modelPinsEqual,
   modelPreferencesMigrationPatch,
   resolveModelPreferences,
 } from "@t3tools/shared/serverSettings";
@@ -320,6 +323,7 @@ export function mergeEnvironmentSettings(
 
 const selectLegacyModelPreferences = (settings: ClientSettings) => ({
   favorites: settings.favorites,
+  pins: settings.pins,
   providerModelPreferences: settings.providerModelPreferences,
 });
 
@@ -426,7 +430,11 @@ export async function prepareModelPreferencesPatch(
   settings: ServerSettings,
   patch: ServerSettingsPatch,
 ): Promise<ServerSettingsPatch> {
-  if (settings.favorites === null || settings.providerModelPreferences === null) {
+  if (
+    settings.favorites === null ||
+    settings.pins === null ||
+    settings.providerModelPreferences === null
+  ) {
     await ensureClientSettingsHydrated();
   }
   return { ...modelPreferencesMigrationPatch(settings, getClientSettings()), ...patch };
@@ -514,6 +522,111 @@ export function useToggleEnvironmentModelFavorite(environmentId: EnvironmentId |
         pendingFavorites.current.delete(key);
       }
     }
+  };
+}
+
+/** Send the desired state so two clients adding a pin do not cancel each other. */
+export function useToggleEnvironmentModelPin(environmentId: EnvironmentId | null) {
+  const registry = use(RegistryContext);
+  const pendingPins = useRef(
+    new Map<string, { pin: boolean; settings: ServerSettings; pending: boolean }>(),
+  );
+  const save = useUpdateEnvironmentModelPreferences(environmentId);
+  return async (
+    provider: ProviderInstanceId,
+    model: string,
+    options?: ReadonlyArray<ProviderOptionSelection>,
+  ) => {
+    if (!environmentId) return;
+    const settingsAtom = serverEnvironment.settingsValueAtom(environmentId);
+    const settings = registry.get(settingsAtom);
+    if (!settings) return;
+    if (settings.pins === null) {
+      try {
+        await ensureClientSettingsHydrated();
+      } catch {
+        toastManager.add({
+          type: "error",
+          title: "Pins not saved",
+          description: "Could not load saved model preferences. Try again.",
+        });
+        return;
+      }
+    }
+    const currentSettings = registry.get(settingsAtom) ?? settings;
+    const pins = resolveModelPreferences(currentSettings, getClientSettings()).pins;
+    const normalizedOptions = options && options.length > 0 ? [...options] : undefined;
+    const targetPin: ModelPin = {
+      provider,
+      model,
+      ...(normalizedOptions ? { options: normalizedOptions } : {}),
+    };
+    const key = JSON.stringify([environmentId, provider, model, normalizedOptions ?? []]);
+    const previous = pendingPins.current.get(key);
+    // Keep the acknowledged choice until the config stream catches up with the RPC reply.
+    const previousPin =
+      previous && (previous.pending || previous.settings.pins === currentSettings.pins)
+        ? previous.pin
+        : pins.some((pin) => modelPinsEqual(pin, targetPin));
+    const pending = {
+      pin: !previousPin,
+      settings: currentSettings,
+      pending: true,
+    };
+    pendingPins.current.set(key, pending);
+    const result = await save({
+      setModelPins: [
+        {
+          provider,
+          model,
+          ...(normalizedOptions ? { options: normalizedOptions } : {}),
+          pin: pending.pin,
+        },
+      ],
+    });
+    if (
+      result &&
+      AsyncResult.isSuccess(result) &&
+      registry.get(settingsAtom)?.pins === currentSettings.pins
+    ) {
+      pending.pending = false;
+    }
+    if (pending.pending && pendingPins.current.get(key) === pending) {
+      if (
+        previous &&
+        !previous.pending &&
+        registry.get(settingsAtom)?.pins === previous.settings.pins
+      ) {
+        pendingPins.current.set(key, previous);
+      } else {
+        pendingPins.current.delete(key);
+      }
+    }
+  };
+}
+
+export function useRenameEnvironmentModelPin(environmentId: EnvironmentId | null) {
+  const save = useUpdateEnvironmentModelPreferences(environmentId);
+  return async (
+    provider: ProviderInstanceId,
+    model: string,
+    options: ReadonlyArray<ProviderOptionSelection> | undefined,
+    label: string | null,
+  ) => {
+    if (!environmentId) return;
+    const normalizedOptions = options && options.length > 0 ? [...options] : undefined;
+    const trimmed = label?.trim() ?? "";
+    await save({
+      setModelPins: [
+        {
+          provider,
+          model,
+          ...(normalizedOptions ? { options: normalizedOptions } : {}),
+          label: trimmed.length > 0 ? trimmed : null,
+          pin: true,
+        },
+      ],
+    });
   };
 }
 

@@ -115,6 +115,14 @@ function NightlySkyArt({ compact = false }: { compact?: boolean }) {
       fill="none"
       preserveAspectRatio="xMinYMin slice"
       viewBox={compact ? "96 0 8192 96" : STAGE_BACKDROP_VIEW_BOX}
+      style={
+        compact
+          ? {
+              background:
+                "radial-gradient(2.25rem 120% at calc(100% - 0.5rem) 20%, color-mix(in srgb, var(--stage-night-glow-highlight) 40%, transparent) 0%, color-mix(in srgb, var(--stage-night-glow-secondary) 16%, transparent) 50%, transparent 100%), linear-gradient(to right, var(--stage-night-bottom) 0%, var(--stage-night-bottom) max(0%, calc(100% - 2.25rem)), var(--stage-night-mid) calc(100% - 1.125rem), var(--stage-night-top) 100%)",
+            }
+          : undefined
+      }
       xmlns="http://www.w3.org/2000/svg"
     >
       <defs>
@@ -190,8 +198,8 @@ function NightlySkyArt({ compact = false }: { compact?: boolean }) {
         </pattern>
       </defs>
 
-      <rect width="100%" height="96" fill={`url(#${skyId})`} />
-      <rect width="100%" height="96" fill={`url(#${glowsId})`} />
+      {!compact ? <rect width="100%" height="96" fill={`url(#${skyId})`} /> : null}
+      {!compact ? <rect width="100%" height="96" fill={`url(#${glowsId})`} /> : null}
       <rect width="100%" height="96" fill={`url(#${starsId})`} />
 
       <g filter={`url(#${softId})`}>
@@ -230,6 +238,14 @@ function DevBlueprintArt({ compact = false }: { compact?: boolean }) {
       fill="none"
       preserveAspectRatio="xMinYMin slice"
       viewBox={compact ? "64 0 8192 96" : STAGE_BACKDROP_VIEW_BOX}
+      style={
+        compact
+          ? {
+              background:
+                "radial-gradient(2.25rem 120% at calc(100% - 0.5rem) 20%, color-mix(in srgb, var(--stage-art-highlight) 40%, transparent) 0%, color-mix(in srgb, var(--stage-art-secondary) 16%, transparent) 52%, transparent 100%), linear-gradient(to right, var(--stage-art-bottom) 0%, var(--stage-art-bottom) max(0%, calc(100% - 2.25rem)), var(--stage-art-mid) calc(100% - 1.125rem), var(--stage-art-top) 100%)",
+            }
+          : undefined
+      }
       xmlns="http://www.w3.org/2000/svg"
     >
       <defs>
@@ -382,8 +398,8 @@ function DevBlueprintArt({ compact = false }: { compact?: boolean }) {
         </pattern>
       </defs>
 
-      <rect width="100%" height="96" fill={`url(#${paperId})`} />
-      <rect width="100%" height="96" fill={`url(#${glowsId})`} />
+      {!compact ? <rect width="100%" height="96" fill={`url(#${paperId})`} /> : null}
+      {!compact ? <rect width="100%" height="96" fill={`url(#${glowsId})`} /> : null}
       <rect width="100%" height="96" fill={`url(#${minorGridId})`} />
       <rect width="100%" height="96" fill={`url(#${majorGridId})`} />
       <rect width="100%" height="6" fill={`url(#${rulerId})`} />

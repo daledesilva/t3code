@@ -239,6 +239,85 @@ describe("withImplicitFastModeDefault", () => {
   });
 });
 
+describe("resolveModelSpeedMode", () => {
+  it("resolves Fast and Standard for models with a fastMode toggle", async () => {
+    const { resolveModelSpeedMode } = await import("./ComposerModelEffort");
+    expect(
+      resolveModelSpeedMode({
+        provider: ProviderDriverKind.make("claudeAgent"),
+        descriptors: [booleanDescriptor("fastMode", false)],
+      }),
+    ).toEqual({
+      option: { id: "fastMode", value: false },
+      label: "Standard",
+    });
+
+    expect(
+      resolveModelSpeedMode({
+        provider: ProviderDriverKind.make("claudeAgent"),
+        descriptors: [booleanDescriptor("fastMode", true)],
+      }),
+    ).toEqual({
+      option: { id: "fastMode", value: true },
+      label: "Fast",
+    });
+  });
+
+  it("resolves Standard, Fast, and Ultrafast for Codex models with serviceTier", async () => {
+    const { resolveModelSpeedMode } = await import("./ComposerModelEffort");
+    const serviceTier = selectDescriptor("serviceTier", [
+      { id: "default", label: "Standard", isDefault: true },
+      { id: "fast", label: "Fast" },
+      { id: "ultrafast", label: "Ultrafast" },
+    ]);
+
+    expect(
+      resolveModelSpeedMode({
+        provider: PROVIDER,
+        descriptors: [serviceTier],
+      }),
+    ).toEqual({
+      option: { id: "serviceTier", value: "default" },
+      label: "Standard",
+    });
+
+    expect(
+      resolveModelSpeedMode({
+        provider: PROVIDER,
+        descriptors: [{ ...serviceTier, currentValue: "fast" }],
+      }),
+    ).toEqual({
+      option: { id: "serviceTier", value: "fast" },
+      label: "Fast",
+    });
+
+    expect(
+      resolveModelSpeedMode({
+        provider: PROVIDER,
+        descriptors: [{ ...serviceTier, currentValue: "ultrafast" }],
+      }),
+    ).toEqual({
+      option: { id: "serviceTier", value: "ultrafast" },
+      label: "Ultrafast",
+    });
+  });
+
+  it("returns null for models without speed modes", async () => {
+    const { resolveModelSpeedMode } = await import("./ComposerModelEffort");
+    expect(
+      resolveModelSpeedMode({
+        provider: PROVIDER,
+        descriptors: [
+          selectDescriptor("effort", [
+            { id: "low", label: "Low" },
+            { id: "high", label: "High", isDefault: true },
+          ]),
+        ],
+      }),
+    ).toBeNull();
+  });
+});
+
 describe("readPromptUltrathink", () => {
   it("tells the Ultrathink prefix apart from the word in the body", () => {
     expect(readPromptUltrathink("Fix the bug")).toBe("none");

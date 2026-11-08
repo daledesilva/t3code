@@ -359,7 +359,10 @@ export function ComposerModelPicker({
   readonly onProviderModelSelect: (
     instanceId: ProviderInstanceId,
     model: string,
-    options?: { focusComposer?: boolean },
+    options?: {
+      focusComposer?: boolean;
+      modelOptions?: ReadonlyArray<import("@t3tools/contracts").ProviderOptionSelection>;
+    },
   ) => void;
 }) {
   const { instanceEntries, modelOptionsByInstance } = pickerProps;

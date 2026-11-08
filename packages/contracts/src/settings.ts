@@ -351,6 +351,15 @@ export const ModelFavorite = Schema.Struct({
   model: TrimmedNonEmptyString,
 });
 export const ModelFavorites = Schema.Array(ModelFavorite);
+export const ModelPin = Schema.Struct({
+  provider: ProviderInstanceId,
+  model: TrimmedNonEmptyString,
+  options: Schema.optionalKey(ProviderOptionSelections),
+  label: Schema.optionalKey(TrimmedNonEmptyString),
+});
+export type ModelPin = typeof ModelPin.Type;
+export const ModelPins = Schema.Array(ModelPin);
+export type ModelPins = typeof ModelPins.Type;
 export const ProviderModelPreferences = Schema.Record(
   ProviderInstanceId,
   Schema.Struct({
@@ -360,6 +369,7 @@ export const ProviderModelPreferences = Schema.Record(
 );
 export type ModelPreferences = {
   readonly favorites: typeof ModelFavorites.Type;
+  readonly pins: typeof ModelPins.Type;
   readonly providerModelPreferences: typeof ProviderModelPreferences.Type;
 };
 
@@ -491,6 +501,7 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
 
   favorites: ModelFavorites.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  pins: ModelPins.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   providerModelPreferences: ProviderModelPreferences.pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
@@ -1250,6 +1261,7 @@ export const CloudSpeechCredentials = Schema.Struct({
 export const ServerSettings = Schema.Struct({
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  pins: Schema.NullOr(ModelPins).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   providerModelPreferences: Schema.NullOr(ProviderModelPreferences).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -1644,6 +1656,15 @@ export const ServerSettingsPatch = Schema.Struct({
   setModelFavorites: Schema.optionalKey(
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
   ),
+  setModelPins: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        ...ModelPin.fields,
+        label: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
+        pin: Schema.Boolean,
+      }),
+    ),
+  ),
   setModelsHidden: Schema.optionalKey(
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, hidden: Schema.Boolean })),
   ),
@@ -1651,11 +1672,13 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({ provider: ProviderInstanceId, modelOrder: Schema.Array(TrimmedString) }),
   ),
   favorites: Schema.optionalKey(ModelFavorites),
+  pins: Schema.optionalKey(ModelPins),
   providerModelPreferences: Schema.optionalKey(ProviderModelPreferences),
   // Applied under the settings service's write lock, only while still unset.
   migrateModelPreferences: Schema.optionalKey(
     Schema.Struct({
       favorites: Schema.optionalKey(ModelFavorites),
+      pins: Schema.optionalKey(ModelPins),
       providerModelPreferences: Schema.optionalKey(ProviderModelPreferences),
     }),
   ),
@@ -1902,6 +1925,7 @@ export const ClientSettingsPatch = Schema.Struct({
   fontSmoothing: Schema.optionalKey(Schema.Boolean),
   persistComposerContextStrip: Schema.optionalKey(Schema.Boolean),
   favorites: Schema.optionalKey(ModelFavorites),
+  pins: Schema.optionalKey(ModelPins),
   providerModelPreferences: Schema.optionalKey(ProviderModelPreferences),
   pullRequestMergeMethodOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, PullRequestMergeMethod),

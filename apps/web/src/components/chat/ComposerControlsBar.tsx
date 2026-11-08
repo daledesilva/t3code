@@ -211,11 +211,9 @@ export function ComposerPinnedModelsRow(props: {
     const showInstanceBadge = shouldShowInstanceBadge(entry, providerInstanceEntries);
     const pinKey = `${pin.provider}:${pin.model}:${JSON.stringify(pin.options ?? [])}`;
     const isRenaming = renamingPinKey === pinKey;
-    const tooltipText = [
-      `Submit with ${pin.label ? `${pin.label} (${triggerLabel})` : triggerLabel}`,
-      pinEffort.detail,
-      disabledReason,
-    ]
+    const pinEffortDetail = pinEffort.detail?.replaceAll(" \u00b7 ", " ") ?? null;
+    const submitTargetLabel = [triggerLabel, pinEffortDetail].filter(Boolean).join(" ");
+    const tooltipText = [`Submit with ${submitTargetLabel}`, disabledReason]
       .filter(Boolean)
       .join(" \u00b7 ");
     const handleContextMenu = (event: ReactMouseEvent<HTMLElement>) => {
@@ -280,7 +278,7 @@ export function ComposerPinnedModelsRow(props: {
     );
     const backdropArt = stageBackdropVariant ? (
       <span className="pointer-events-none absolute inset-0 -z-10" aria-hidden="true">
-        <StageBackdropButtonArt variant={stageBackdropVariant} />
+        <StageBackdropButtonArt variant={stageBackdropVariant} lightEdge="start" />
       </span>
     ) : null;
     const toneClassName = stageBackdropVariant
@@ -294,19 +292,23 @@ export function ComposerPinnedModelsRow(props: {
           className={cn(PINNED_MODEL_SUBMIT_PILL, toneClassName)}
         >
           {backdropArt}
-          <PinnedModelRenameInput
-            initialValue={pin.label ?? defaultTriggerTitle}
-            placeholder={defaultTriggerTitle}
-            onCommit={(nextValue) => {
-              setRenamingPinKey(null);
-              const trimmed = nextValue.trim();
-              const nextLabel =
-                trimmed.length === 0 || trimmed === defaultTriggerTitle ? null : trimmed;
-              if ((nextLabel ?? undefined) === pin.label) return;
-              void renamePin(pin.provider, pin.model, pin.options, nextLabel);
-            }}
-            onCancel={() => setRenamingPinKey(null)}
-          />
+          <span className="flex min-w-0 items-center gap-1.5">
+            {iconElement}
+            <PinnedModelRenameInput
+              initialValue={pin.label ?? defaultTriggerTitle}
+              placeholder={defaultTriggerTitle}
+              onCommit={(nextValue) => {
+                setRenamingPinKey(null);
+                const trimmed = nextValue.trim();
+                const nextLabel =
+                  trimmed.length === 0 || trimmed === defaultTriggerTitle ? null : trimmed;
+                if ((nextLabel ?? undefined) === pin.label) return;
+                void renamePin(pin.provider, pin.model, pin.options, nextLabel);
+              }}
+              onCancel={() => setRenamingPinKey(null)}
+            />
+            {upArrowIcon}
+          </span>
         </div>,
       ];
     }
@@ -317,7 +319,7 @@ export function ComposerPinnedModelsRow(props: {
         key={pinKey}
         type="button"
         aria-disabled={!isActionReady || undefined}
-        aria-label={`Submit with ${[triggerTitle, pinEffort.detail].filter(Boolean).join(", ")}`}
+        aria-label={`Submit with ${submitTargetLabel}`}
         data-chat-model-pin="true"
         disabled={isHardDisabled}
         onClick={(event) => {
@@ -345,16 +347,10 @@ export function ComposerPinnedModelsRow(props: {
       >
         {backdropArt}
         <span className="flex min-w-0 items-center gap-1.5">
-          {hasCustomName ? (
-            <span className="max-w-40 min-w-0 truncate">{triggerTitle}</span>
-          ) : (
-            <>
-              {iconElement}
-              <span className="max-w-40 min-w-0 truncate">{triggerTitle}</span>
-              {pinEffort.suffix}
-              {upArrowIcon}
-            </>
-          )}
+          {iconElement}
+          <span className="max-w-40 min-w-0 truncate">{triggerTitle}</span>
+          {!hasCustomName ? pinEffort.suffix : null}
+          {upArrowIcon}
         </span>
       </button>
     );

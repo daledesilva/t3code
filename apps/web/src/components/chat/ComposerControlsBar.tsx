@@ -39,6 +39,7 @@ import {
   useRenameEnvironmentModelPin,
   useToggleEnvironmentModelPin,
 } from "~/hooks/useSettings";
+import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "../../localApi";
 import { getProviderModelCapabilities } from "../../providerModels";
@@ -407,6 +408,7 @@ export function ComposerPinnedModelsRow(props: {
 
   return (
     <div
+      ref={observePinnedModelsRowWrap}
       data-chat-model-pins="true"
       className={cn(
         inline
@@ -419,6 +421,33 @@ export function ComposerPinnedModelsRow(props: {
       {trailingAccessory}
     </div>
   );
+}
+
+function observePinnedModelsRowWrap(pinsRow: HTMLDivElement | null) {
+  if (!pinsRow) return;
+  const footer = pinsRow.closest<HTMLElement>('[data-chat-composer-footer="true"]');
+  const leftActions = footer?.querySelector<HTMLElement>(
+    '[data-chat-composer-left-actions="true"]',
+  );
+  if (!footer || !leftActions) return;
+  const syncWrapped = () => {
+    const wrapped = pinsRow.offsetTop >= leftActions.offsetTop + leftActions.offsetHeight / 2;
+    if (wrapped) {
+      leftActions.dataset.pinnedModelsWrapped = "true";
+    } else {
+      delete leftActions.dataset.pinnedModelsWrapped;
+    }
+  };
+  syncWrapped();
+  const stopFooter = observeResize(footer, syncWrapped);
+  const stopLeftActions = observeResize(leftActions, syncWrapped);
+  const stopPins = observeResize(pinsRow, syncWrapped);
+  return () => {
+    stopFooter();
+    stopLeftActions();
+    stopPins();
+    delete leftActions.dataset.pinnedModelsWrapped;
+  };
 }
 
 /**

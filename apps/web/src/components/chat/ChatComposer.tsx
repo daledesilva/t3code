@@ -3855,7 +3855,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         "relative flex min-w-0 items-center overflow-visible px-2 pb-2",
                         showCustomControlsInBottomRow
                           ? "flex-nowrap"
-                          : "flex-wrap gap-y-1.5 data-[pinned-models-wrapped=true]:gap-y-3",
+                          : "flex-wrap gap-y-1.5 data-[pinned-models-wrapped=true]:gap-y-3 data-[pinned-models-wrapped=true]:pb-3",
                         pendingUserInputs.length > 0 && "pt-2",
                         showMobilePendingAnswerActions &&
                           speechInput.state.phase === "idle" &&
@@ -3863,11 +3863,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       )}
                     >
                       {composerAttachButton || speechInput.available || modeSwapButton ? (
-                        <div
-                          data-chat-composer-left-actions="true"
-                          className="me-2 flex shrink-0 flex-col"
-                        >
-                          <div className="flex items-center gap-0.5 in-data-[pinned-models-wrapped=true]:mb-1.5">
+                        <>
+                          <div
+                            data-chat-composer-left-actions="true"
+                            className="me-2 flex shrink-0 items-center gap-0.5 in-data-[pinned-models-wrapped=true]:mb-1.5"
+                          >
                             {composerAttachButton}
                             {speechInput.available ? (
                               <>
@@ -3906,10 +3906,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             ) : null}
                           </div>
                           <div
+                            data-chat-composer-pins-divider="true"
                             aria-hidden="true"
                             className="pointer-events-none absolute inset-x-3.5 hidden h-px bg-border/80 in-data-[pinned-models-wrapped=true]:block"
                           />
-                        </div>
+                        </>
                       ) : null}
                       <VoiceInputSetup
                         environmentId={speechInput.transcriptionEnvironmentId}
@@ -3956,7 +3957,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           pendingPinnedModel={pendingPinnedModel}
                           onPendingPinnedModelEntered={() => setPendingPinnedModel(null)}
                           inline
-                          className="ms-auto"
+                          className="ms-auto in-data-[pinned-models-wrapped=true]:mx-auto"
                         />
                       )}
                     </div>

@@ -412,7 +412,7 @@ export function ComposerPinnedModelsRow(props: {
       data-chat-model-pins="true"
       className={cn(
         inline
-          ? "flex min-h-9 min-w-0 flex-wrap items-center justify-end gap-1.5 sm:min-h-8"
+          ? "flex min-h-9 min-w-0 flex-wrap items-center justify-end gap-1.5 in-data-[pinned-models-wrapped=true]:justify-center sm:min-h-8"
           : "flex min-h-9 min-w-0 flex-wrap items-center justify-end gap-1.5 px-2 pb-1.5 sm:min-h-8",
         props.className,
       )}
@@ -429,13 +429,20 @@ function observePinnedModelsRowWrap(pinsRow: HTMLDivElement | null) {
   const leftActions = footer?.querySelector<HTMLElement>(
     '[data-chat-composer-left-actions="true"]',
   );
+  const divider = footer?.querySelector<HTMLElement>('[data-chat-composer-pins-divider="true"]');
   if (!footer || !leftActions) return;
   const syncWrapped = () => {
     const wrapped = pinsRow.offsetTop >= leftActions.offsetTop + leftActions.offsetHeight / 2;
     if (wrapped) {
       footer.dataset.pinnedModelsWrapped = "true";
+      if (divider) {
+        divider.style.top = `${leftActions.offsetTop + leftActions.offsetHeight + 6}px`;
+      }
     } else {
       delete footer.dataset.pinnedModelsWrapped;
+      if (divider) {
+        divider.style.removeProperty("top");
+      }
     }
   };
   syncWrapped();
@@ -447,6 +454,9 @@ function observePinnedModelsRowWrap(pinsRow: HTMLDivElement | null) {
     stopLeftActions();
     stopPins();
     delete footer.dataset.pinnedModelsWrapped;
+    if (divider) {
+      divider.style.removeProperty("top");
+    }
   };
 }
 

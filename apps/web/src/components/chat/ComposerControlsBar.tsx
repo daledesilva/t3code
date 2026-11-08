@@ -111,7 +111,7 @@ function PinnedModelRenameInput(props: {
 }
 
 const PINNED_MODEL_SUBMIT_PILL =
-  "group/model-trigger relative isolate inline-flex h-9 shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-full px-3 font-medium text-base whitespace-nowrap shadow-xs transition-all duration-150 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:h-8 sm:text-sm";
+  "group/model-trigger relative isolate inline-flex h-9 shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-full ps-3 pe-2.75 font-medium text-base whitespace-nowrap shadow-xs transition-all duration-150 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:h-8 sm:pe-2.25 sm:text-sm";
 
 export function ComposerPinnedModelsRow(props: {
   environmentId: EnvironmentId;

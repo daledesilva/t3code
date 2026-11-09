@@ -1556,11 +1556,39 @@ it("keeps concurrent approvals actionable outside collapsed work and restores se
     .toBeVisible();
 });
 
-it("renders the Stop button with icon and text below active work and hides it when finished", async () => {
+it("renders the Stop button inline on the right for thinking rows and drops below tool logs on the right", async () => {
   const onInterrupt = vi.fn();
   const runId = RunId.make("run-live");
-  const entries = [
-    message("Inspect the timeline", {}, "user-1"),
+  const base = baseProps();
+  const thinkingEntries = [message("Inspect the timeline", {}, "user-1")];
+  await using screen = await renderElement(
+    <MessagesTimeline
+      {...base}
+      timelineEntries={thinkingEntries}
+      isWorking
+      runningRunId={runId}
+      activeTurnStartedAt={CREATED_AT}
+      canOperateThread
+      canInterrupt
+      onInterrupt={onInterrupt}
+    />,
+  );
+
+  const stopButton = screen.getByRole("button", { name: "Stop generation" });
+  await expect.element(stopButton).toBeVisible();
+  await expect.element(stopButton).toHaveTextContent("Stop");
+  expect(stopButton.element().querySelector("svg rect")).not.toBeNull();
+
+  const thinkingRow = screen.container.querySelector<HTMLElement>(
+    '[data-timeline-row-kind="thinking"]',
+  )!;
+  expect(thinkingRow.contains(stopButton.element())).toBe(true);
+  const thinkingLabelRect = screen.getByText("Thinking").first().element().getBoundingClientRect();
+  const inlineStopRect = stopButton.element().getBoundingClientRect();
+  expect(inlineStopRect.left).toBeGreaterThan(thinkingLabelRect.right);
+
+  const toolEntries = [
+    ...thinkingEntries,
     work("work-read", {
       runId,
       label: "Read src/components/chat/MessagesTimeline.tsx",
@@ -1569,32 +1597,39 @@ it("renders the Stop button with icon and text below active work and hides it wh
       status: "inProgress",
     }),
   ];
-  await using screen = await renderTimeline(entries, {
-    isWorking: true,
-    runningRunId: runId,
-    activeTurnStartedAt: CREATED_AT,
-    canOperateThread: true,
-    canInterrupt: true,
-    onInterrupt,
-  });
-
-  const stopButton = screen.getByRole("button", { name: "Stop generation" });
-  await expect.element(stopButton).toBeVisible();
-  await expect.element(stopButton).toHaveTextContent("Stop");
-  expect(stopButton.element().querySelector("svg rect")).not.toBeNull();
+  await screen.rerender(
+    <MessagesTimeline
+      {...base}
+      timelineEntries={toolEntries}
+      isWorking
+      runningRunId={runId}
+      activeTurnStartedAt={CREATED_AT}
+      canOperateThread
+      canInterrupt
+      onInterrupt={onInterrupt}
+    />,
+  );
 
   const liveWorkRow = screen.getByText("Read src/components/chat/MessagesTimeline.tsx").element();
+  const workLiveContainer = screen.container.querySelector<HTMLElement>(
+    '[data-timeline-row-kind="work-live"]',
+  )!;
+  expect(workLiveContainer.contains(stopButton.element())).toBe(false);
   expect(
     liveWorkRow.compareDocumentPosition(stopButton.element()) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).not.toBe(0);
+  const belowStopRect = stopButton.element().getBoundingClientRect();
+  const workRowRect = workLiveContainer.getBoundingClientRect();
+  expect(belowStopRect.top).toBeGreaterThanOrEqual(workRowRect.bottom - 1);
+  expect(belowStopRect.right).toBeGreaterThan(workRowRect.left + workRowRect.width / 2);
 
   await stopButton.click();
   expect(onInterrupt).toHaveBeenCalledOnce();
 
   await screen.rerender(
     <MessagesTimeline
-      {...baseProps()}
-      timelineEntries={entries}
+      {...base}
+      timelineEntries={toolEntries}
       isWorking={false}
       canOperateThread
       canInterrupt={false}

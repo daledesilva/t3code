@@ -114,6 +114,7 @@ import {
   WorkGroupSection,
   WorkingTimelineRow,
   ThinkingTimelineRow,
+  TimelineStopGenerationButton,
   LiveWorkEntryTimelineRow,
   WorkGroupToggleTimelineRow,
 } from "./TimelineWorkGroupRows";
@@ -1081,6 +1082,20 @@ const ConversationTimeline = memo(function ConversationTimeline({
     latestRun?.startedAt != null
       ? worktreeSetup
       : null;
+  const lastTimelineRow = rows.at(-1);
+  const inlineStopRowId =
+    canInterrupt &&
+    onInterrupt !== undefined &&
+    unmatchedPendingApprovals.length === 0 &&
+    !compactionAwaitingRow &&
+    !isPreparingWorktree &&
+    lastTimelineRow !== undefined &&
+    ((lastTimelineRow.kind === "thinking" && pendingApprovalsByRequestId.size === 0) ||
+      (lastTimelineRow.kind === "work-live" &&
+        !lastTimelineRow.expanded &&
+        lastTimelineRow.entry.itemType === "reasoning"))
+      ? lastTimelineRow.id
+      : null;
   const activityState: TimelineRowActivityState = {
     isWorking,
     isCompacting: compactionAwaitingRow,
@@ -1091,6 +1106,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     latestRunId: latestRun?.runId ?? null,
     liveAnswerPreview:
       isWorking && toolCallVisibility === "zen" ? liveAnswerPreview(timelineEntries) : null,
+    inlineStopRowId,
+    onInterrupt: canInterrupt ? (onInterrupt ?? null) : null,
   };
   // Mounted in both the empty and filled timeline so a thread's first turn
   // starts from a baseline instead of a fresh, silent region.
@@ -1257,35 +1274,24 @@ const ConversationTimeline = memo(function ConversationTimeline({
       </div>
     </TimelineRowCtx>
   );
-  const listExtraData = { identity: listIdentityKey, rowCount: rows.length, sharedState };
+  const listExtraData = {
+    identity: listIdentityKey,
+    rowCount: rows.length,
+    sharedState,
+    inlineStopRowId,
+  };
   const timelineListFooter = (
     <TimelineListFooter
       composerInset={anchoredEndSpace ? 0 : contentInsetEndAdjustment}
       onGrow={onFooterGrow}
     >
-      {canInterrupt && onInterrupt ? (
+      {canInterrupt && onInterrupt && inlineStopRowId === null ? (
         <div className="messages-timeline-row-frame">
-          <div className="chat-content-lane overflow-x-clip pb-2" data-timeline-root="true">
-            <button
-              type="button"
-              className="inline-flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-destructive/90 px-3 font-medium text-sm text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none [&_svg]:pointer-events-none"
-              disabled={!canOperateThread}
-              onClick={() => {
-                if (canOperateThread) onInterrupt();
-              }}
-              aria-label="Stop generation"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
-                fill="currentColor"
-                aria-hidden="true"
-              >
-                <rect x="2" y="2" width="8" height="8" rx="1.5" />
-              </svg>
-              <span>Stop</span>
-            </button>
+          <div
+            className="chat-content-lane flex justify-end overflow-x-clip pb-2"
+            data-timeline-root="true"
+          >
+            <TimelineStopGenerationButton disabled={!canOperateThread} onInterrupt={onInterrupt} />
           </div>
         </div>
       ) : null}

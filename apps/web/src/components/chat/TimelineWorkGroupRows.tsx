@@ -358,9 +358,35 @@ function CompactingLabel({ createdAt }: { createdAt: string | null }) {
   );
 }
 
+export function TimelineStopGenerationButton({
+  disabled = false,
+  onInterrupt,
+}: {
+  disabled?: boolean;
+  onInterrupt: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="inline-flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-destructive/90 px-3 font-medium text-sm text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none [&_svg]:pointer-events-none"
+      disabled={disabled}
+      onClick={() => {
+        if (!disabled) onInterrupt();
+      }}
+      aria-label="Stop generation"
+    >
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+        <rect x="2" y="2" width="8" height="8" rx="1.5" />
+      </svg>
+      <span>Stop</span>
+    </button>
+  );
+}
+
 export function ThinkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "thinking" }> }) {
   const ctx = use(TimelineRowCtx);
-  const { isCompacting, isPreparingWorktree, liveAnswerPreview } = use(TimelineRowActivityCtx);
+  const { isCompacting, isPreparingWorktree, liveAnswerPreview, inlineStopRowId, onInterrupt } =
+    use(TimelineRowActivityCtx);
   if (isPreparingWorktree || isCompacting) return <WorkLogRow label="" />;
   // A failed group keeps this disclosure while an approval waits, but nothing is thinking then.
   const live = ctx.pendingApprovals.size === 0;
@@ -373,16 +399,26 @@ export function ThinkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind:
     />
   );
   const { groupId } = row;
-  if (groupId === undefined) return activity;
+  const content =
+    groupId === undefined ? (
+      activity
+    ) : (
+      <button
+        type="button"
+        className="group/live-work flex min-h-6 min-w-0 flex-1 max-w-full cursor-pointer items-center rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        aria-expanded={row.expanded === true}
+        onClick={() => ctx.onToggleWorkGroup(groupId, row.id)}
+      >
+        {activity}
+      </button>
+    );
+  const showInlineStop = inlineStopRowId === row.id && onInterrupt !== null;
+  if (!showInlineStop) return content;
   return (
-    <button
-      type="button"
-      className="group/live-work flex min-h-6 w-full max-w-full cursor-pointer items-center rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-      aria-expanded={row.expanded === true}
-      onClick={() => ctx.onToggleWorkGroup(groupId, row.id)}
-    >
-      {activity}
-    </button>
+    <div className="flex min-w-0 items-center justify-between gap-2">
+      <div className="min-w-0 flex-1">{content}</div>
+      <TimelineStopGenerationButton disabled={!ctx.canOperateThread} onInterrupt={onInterrupt} />
+    </div>
   );
 }
 
@@ -496,6 +532,7 @@ export function LiveWorkEntryTimelineRow({
   row: Extract<TimelineRow, { kind: "work-live" }>;
 }) {
   const ctx = use(TimelineRowCtx);
+  const { inlineStopRowId, onInterrupt } = use(TimelineRowActivityCtx);
   const threadTarget = useThreadReadTarget(row.entry, ctx.activeThreadEnvironmentId);
   const label = liveWorkEntryLabel(row.entry, ctx.workspaceRoot, row.active);
   const threadLabel = threadReadLabel(label, threadTarget);
@@ -508,8 +545,9 @@ export function LiveWorkEntryTimelineRow({
   const failed = workEntryDisplayIndicatesToolFailure(row.entry);
   const thoughtLine = row.thought && !row.expanded ? liveThoughtLine(row.thought.detail ?? "") : "";
   const thoughtIsStatus = thoughtLine !== "" && row.entry === row.thought;
+  const showInlineStop = inlineStopRowId === row.id && onInterrupt !== null;
 
-  return (
+  const button = (
     <button
       type="button"
       className={cn(
@@ -582,6 +620,14 @@ export function LiveWorkEntryTimelineRow({
         active={row.active}
       />
     </button>
+  );
+
+  if (!showInlineStop) return button;
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-2">
+      <div className="min-w-0 flex-1">{button}</div>
+      <TimelineStopGenerationButton disabled={!ctx.canOperateThread} onInterrupt={onInterrupt} />
+    </div>
   );
 }
 

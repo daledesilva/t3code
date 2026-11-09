@@ -236,6 +236,8 @@ interface MessagesTimelineProps {
   onOpenWorktreeSetupTerminal?: (terminalId: string) => void;
   isPreparingWorktree?: boolean;
   isCompacting?: boolean;
+  canInterrupt?: boolean;
+  onInterrupt?: () => void;
   awaitingUser?: "approval" | "input" | null;
   /** Which request is waiting, so a second one of the same kind is announced too. */
   awaitingRequestId?: string | null;
@@ -350,6 +352,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onOpenWorktreeSetupTerminal,
   isPreparingWorktree = false,
   isCompacting = false,
+  canInterrupt = false,
+  onInterrupt,
   awaitingUser = null,
   awaitingRequestId = null,
   listRef,
@@ -720,6 +724,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     rows.length === 0 &&
     unmatchedPendingApprovals.length === 0 &&
     !isWorking &&
+    !canInterrupt &&
     parentThreadLink === null &&
     historyControls === undefined &&
     footer === null;
@@ -1258,6 +1263,32 @@ const ConversationTimeline = memo(function ConversationTimeline({
       composerInset={anchoredEndSpace ? 0 : contentInsetEndAdjustment}
       onGrow={onFooterGrow}
     >
+      {canInterrupt && onInterrupt ? (
+        <div className="messages-timeline-row-frame">
+          <div className="chat-content-lane overflow-x-clip pb-2" data-timeline-root="true">
+            <button
+              type="button"
+              className="inline-flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-destructive/90 px-3 font-medium text-sm text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none [&_svg]:pointer-events-none"
+              disabled={!canOperateThread}
+              onClick={() => {
+                if (canOperateThread) onInterrupt();
+              }}
+              aria-label="Stop generation"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <rect x="2" y="2" width="8" height="8" rx="1.5" />
+              </svg>
+              <span>Stop</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
       {footer}
       {unmatchedPendingApprovals.length > 0 ? (
         <TimelineRowCtx value={sharedState}>

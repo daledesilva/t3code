@@ -30,7 +30,7 @@ interface ComposerPrimaryActionsProps {
   canOperateThread: boolean;
   pendingAction: PendingActionState | null;
   isRunning: boolean;
-  canInterrupt: boolean;
+  canInterrupt?: boolean;
   followUpBehavior?: "queue" | "steer";
   canSteer?: boolean;
   alternateShortcutLabel?: string | null;
@@ -49,7 +49,7 @@ interface ComposerPrimaryActionsProps {
   onSubmitMessage?: MouseEventHandler<HTMLButtonElement>;
   onResume?: () => void;
   onPreviousPendingQuestion: () => void;
-  onInterrupt: () => void;
+  onInterrupt?: () => void;
   onImplementPlanInNewThread: () => void;
   compactBeforeSendTokens?: number | null;
   keepFullHistory?: boolean;
@@ -86,7 +86,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   canOperateThread,
   pendingAction,
   isRunning,
-  canInterrupt,
   followUpBehavior = "steer",
   canSteer = true,
   alternateShortcutLabel = null,
@@ -104,7 +103,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   onSubmitMessage,
   onResume,
   onPreviousPendingQuestion,
-  onInterrupt,
   onImplementPlanInNewThread,
   compactBeforeSendTokens = null,
   keepFullHistory = false,
@@ -116,6 +114,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const shortcutModifiers = useShortcutModifierState();
   const isQueuing =
+    hasSendableContent &&
     !isEditingQueuedMessage &&
     resolveComposerDispatchMode({
       running: isRunning,
@@ -127,37 +126,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const isSendDisabled = !canOperateThread || sendDisabledReason !== null;
   const stageBackdropVariant = useSidebarStageBackdropVariant(environmentIdentificationMode);
 
-  const renderStopGenerationButton = (insidePendingAction: boolean) => (
-    <Tooltip key="interrupt">
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            className={cn(
-              "flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none [&_svg]:pointer-events-none",
-              insidePendingAction ? "size-8 sm:size-7" : "size-8 sm:h-8 sm:w-8",
-            )}
-            {...pointerFocusProps}
-            disabled={!canOperateThread}
-            onClick={() => {
-              if (canOperateThread) onInterrupt();
-            }}
-            aria-label="Stop generation"
-          />
-        }
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-          <rect x="2" y="2" width="8" height="8" rx="1.5" />
-        </svg>
-      </TooltipTrigger>
-      <TooltipPopup>Interrupt</TooltipPopup>
-    </Tooltip>
-  );
-
   if (pendingAction) {
     return (
       <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
-        {canInterrupt ? renderStopGenerationButton(true) : null}
         {pendingAction.questionIndex > 0 ? (
           compact ? (
             <Button
@@ -266,10 +237,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  if (canInterrupt && !hasSendableContent && !isEditingQueuedMessage) {
-    return renderStopGenerationButton(false);
-  }
-
   const showResume = canResume && !hasSendableContent && !isEditingQueuedMessage;
 
   const compactTokens =
@@ -284,11 +251,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       ? "Update queued message"
       : compactsBeforeSend
         ? "Compact and send"
-        : isQueuing
-          ? "Queue message"
-          : isRunning
-            ? "Steer message"
-            : "Submit message";
+        : isRunning && hasSendableContent
+          ? isQueuing
+            ? "Queue message"
+            : "Steer message"
+          : "Submit message";
   const submitStatus = isEnvironmentUnavailable
     ? "Environment disconnected"
     : (sendDisabledReason ??
@@ -303,8 +270,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     submitStatus ??
     (compactsBeforeSend
       ? `Summarize ${compactTokens} tokens of history, then send`
-      : isRunning && !isEditingQueuedMessage && canSteer
-        ? `Click to ${followUpBehavior}, ${isMacPlatform(navigator.platform) ? "⌘" : "Ctrl"}-click${alternateShortcutLabel ? ` or ${alternateShortcutLabel}` : ""} to ${alternateAction}`
+      : isRunning && hasSendableContent && !isEditingQueuedMessage && canSteer
+        ? `Click to ${followUpBehavior}, ${isMacPlatform(navigator.platform) ? "\u2318" : "Ctrl"}-click${alternateShortcutLabel ? ` or ${alternateShortcutLabel}` : ""} to ${alternateAction}`
         : submitLabel);
 
   const sendButton = (
@@ -337,7 +304,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         <PlayIcon className="size-4 fill-current" aria-hidden="true" />
       ) : isEditingQueuedMessage ? (
         <CheckIcon className="size-4" aria-hidden="true" />
-      ) : isRunning ? (
+      ) : isRunning && hasSendableContent ? (
         <MorphIcon className="size-4" icon={isQueuing ? ListPlus : CornerUpRight} />
       ) : (
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">

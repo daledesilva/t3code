@@ -1555,3 +1555,51 @@ it("keeps concurrent approvals actionable outside collapsed work and restores se
     .element(screen.getByRole("button", { name: "Open the current tab", exact: true }))
     .toBeVisible();
 });
+
+it("renders the Stop button with icon and text below active work and hides it when finished", async () => {
+  const onInterrupt = vi.fn();
+  const runId = RunId.make("run-live");
+  const entries = [
+    message("Inspect the timeline", {}, "user-1"),
+    work("work-read", {
+      runId,
+      label: "Read src/components/chat/MessagesTimeline.tsx",
+      tone: "tool",
+      itemType: "file_read",
+      status: "inProgress",
+    }),
+  ];
+  await using screen = await renderTimeline(entries, {
+    isWorking: true,
+    runningRunId: runId,
+    activeTurnStartedAt: CREATED_AT,
+    canOperateThread: true,
+    canInterrupt: true,
+    onInterrupt,
+  });
+
+  const stopButton = screen.getByRole("button", { name: "Stop generation" });
+  await expect.element(stopButton).toBeVisible();
+  await expect.element(stopButton).toHaveTextContent("Stop");
+  expect(stopButton.element().querySelector("svg rect")).not.toBeNull();
+
+  const liveWorkRow = screen.getByText("Read src/components/chat/MessagesTimeline.tsx").element();
+  expect(
+    liveWorkRow.compareDocumentPosition(stopButton.element()) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).not.toBe(0);
+
+  await stopButton.click();
+  expect(onInterrupt).toHaveBeenCalledOnce();
+
+  await screen.rerender(
+    <MessagesTimeline
+      {...baseProps()}
+      timelineEntries={entries}
+      isWorking={false}
+      canOperateThread
+      canInterrupt={false}
+      onInterrupt={onInterrupt}
+    />,
+  );
+  await expect.element(stopButton).not.toBeInTheDocument();
+});

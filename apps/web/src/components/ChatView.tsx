@@ -3442,6 +3442,8 @@ export default function ChatView(props: ChatViewProps) {
                   isWorking={isWorking}
                   runlessWorkActive={runlessWorkStartedAt !== null}
                   isCompacting={isCompacting}
+                  canInterrupt={canInterruptRunningThread}
+                  onInterrupt={onInterruptStable}
                   awaitingUser={
                     activePendingApproval !== null
                       ? "approval"

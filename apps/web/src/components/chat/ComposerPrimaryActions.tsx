@@ -1,5 +1,5 @@
 import { memo, type MouseEventHandler, type PointerEventHandler } from "react";
-import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, Minimize2Icon, PlayIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, Minimize2Icon } from "lucide-react";
 import { CornerUpRight, ListPlus } from "lucide";
 import { MorphIcon } from "~/components/MorphIcon";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
@@ -43,11 +43,9 @@ interface ComposerPrimaryActionsProps {
   isEnvironmentUnavailable: boolean;
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
-  canResume?: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
   isEditingQueuedMessage?: boolean;
   onSubmitMessage?: MouseEventHandler<HTMLButtonElement>;
-  onResume?: () => void;
   onPreviousPendingQuestion: () => void;
   onInterrupt?: () => void;
   onImplementPlanInNewThread: () => void;
@@ -97,11 +95,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEnvironmentUnavailable,
   isPreparingWorktree,
   hasSendableContent,
-  canResume = false,
   preserveComposerFocusOnPointerDown = false,
   isEditingQueuedMessage = false,
   onSubmitMessage,
-  onResume,
   onPreviousPendingQuestion,
   onImplementPlanInNewThread,
   compactBeforeSendTokens = null,
@@ -179,7 +175,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  if (showPlanFollowUpPrompt && (promptHasText || !canResume)) {
+  if (showPlanFollowUpPrompt) {
     if (promptHasText) {
       return (
         <button
@@ -237,25 +233,21 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  const showResume = canResume && !hasSendableContent && !isEditingQueuedMessage;
-
   const compactTokens =
-    compactBeforeSendTokens !== null && !showResume && !isEditingQueuedMessage
+    compactBeforeSendTokens !== null && !isEditingQueuedMessage
       ? formatContextWindowTokens(compactBeforeSendTokens)
       : null;
   const compactsBeforeSend = compactTokens !== null && !keepFullHistory;
 
-  const submitLabel = showResume
-    ? "Resume thread"
-    : isEditingQueuedMessage
-      ? "Update queued message"
-      : compactsBeforeSend
-        ? "Compact and send"
-        : isRunning && hasSendableContent
-          ? isQueuing
-            ? "Queue message"
-            : "Steer message"
-          : "Submit message";
+  const submitLabel = isEditingQueuedMessage
+    ? "Update queued message"
+    : compactsBeforeSend
+      ? "Compact and send"
+      : isRunning && hasSendableContent
+        ? isQueuing
+          ? "Queue message"
+          : "Steer message"
+        : "Submit message";
   const submitStatus = isEnvironmentUnavailable
     ? "Environment disconnected"
     : (sendDisabledReason ??
@@ -276,7 +268,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
 
   const sendButton = (
     <button
-      type={showResume ? "button" : "submit"}
+      type="submit"
       className={cn(
         "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
         stageBackdropVariant
@@ -284,13 +276,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           : "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover disabled:bg-foreground/12 disabled:text-muted-foreground",
       )}
       {...pointerFocusProps}
-      onClick={showResume ? onResume : onSubmitMessage}
-      disabled={
-        isSendBusy ||
-        isSendDisabled ||
-        isEnvironmentUnavailable ||
-        (!hasSendableContent && !showResume)
-      }
+      onClick={onSubmitMessage}
+      disabled={isSendBusy || isSendDisabled || isEnvironmentUnavailable || !hasSendableContent}
       aria-label={submitStatus ?? submitLabel}
     >
       {stageBackdropVariant ? (
@@ -300,8 +287,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       ) : null}
       {isSendBusy ? (
         <Spinner size="sm" aria-hidden="true" />
-      ) : showResume ? (
-        <PlayIcon className="size-4 fill-current" aria-hidden="true" />
       ) : isEditingQueuedMessage ? (
         <CheckIcon className="size-4" aria-hidden="true" />
       ) : isRunning && hasSendableContent ? (

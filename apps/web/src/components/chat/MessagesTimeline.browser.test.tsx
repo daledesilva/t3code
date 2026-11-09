@@ -1626,15 +1626,39 @@ it("renders the Stop button inline on the right for thinking rows and drops belo
   await stopButton.click();
   expect(onInterrupt).toHaveBeenCalledOnce();
 
+  const onResume = vi.fn();
+  const completedToolEntries = [
+    ...thinkingEntries,
+    work("work-read", {
+      runId,
+      label: "Read src/components/chat/MessagesTimeline.tsx",
+      tone: "tool",
+      itemType: "file_read",
+      status: "completed",
+    }),
+  ];
   await screen.rerender(
     <MessagesTimeline
       {...base}
-      timelineEntries={toolEntries}
+      timelineEntries={completedToolEntries}
       isWorking={false}
       canOperateThread
       canInterrupt={false}
       onInterrupt={onInterrupt}
+      canResume
+      onResume={onResume}
     />,
   );
   await expect.element(stopButton).not.toBeInTheDocument();
+
+  const resumeButton = screen.getByRole("button", { name: "Resume thread" });
+  await expect.element(resumeButton).toBeVisible();
+  await expect.element(resumeButton).toHaveTextContent("Resume");
+  expect(resumeButton.element().className).toContain("bg-message-action");
+  const resumeRect = resumeButton.element().getBoundingClientRect();
+  const containerRect = screen.container.getBoundingClientRect();
+  expect(resumeRect.right).toBeGreaterThan(containerRect.left + containerRect.width / 2);
+
+  await resumeButton.click();
+  expect(onResume).toHaveBeenCalledOnce();
 });

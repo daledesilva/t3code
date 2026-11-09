@@ -3444,6 +3444,15 @@ export default function ChatView(props: ChatViewProps) {
                   isCompacting={isCompacting}
                   canInterrupt={canInterruptRunningThread}
                   onInterrupt={onInterruptStable}
+                  canResume={resumableRunId !== null || hasHeldQueuedRuns}
+                  resumeDisabled={
+                    isSendBusy ||
+                    isResuming ||
+                    isRevertingCheckpoint ||
+                    threadDetailLoading ||
+                    activeEnvironmentUnavailable
+                  }
+                  onResume={onComposerResumeStable}
                   awaitingUser={
                     activePendingApproval !== null
                       ? "approval"
@@ -3650,7 +3659,6 @@ export default function ChatView(props: ChatViewProps) {
                                   queuedRunEdit.isSaving ||
                                   isResuming
                                 }
-                                canResume={resumableRunId !== null || hasHeldQueuedRuns}
                                 isRevertingCheckpoint={isRevertingCheckpoint}
                                 sendDisabledReason={
                                   !canOperateThread
@@ -3749,7 +3757,6 @@ export default function ChatView(props: ChatViewProps) {
                                 onPageScrollRelease={onComposerPageScrollReleaseStable}
                                 onCompactContext={onComposerCompactContextStable}
                                 onSend={onComposerSendStable}
-                                onResume={onComposerResumeStable}
                                 onInterrupt={onInterruptStable}
                                 onImplementPlanInNewThread={onImplementPlanInNewThreadStable}
                                 onSelectActivePendingUserInputOption={

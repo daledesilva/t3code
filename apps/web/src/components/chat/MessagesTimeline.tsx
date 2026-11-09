@@ -115,6 +115,7 @@ import {
   WorkingTimelineRow,
   ThinkingTimelineRow,
   TimelineStopGenerationButton,
+  TimelineResumeThreadButton,
   LiveWorkEntryTimelineRow,
   WorkGroupToggleTimelineRow,
 } from "./TimelineWorkGroupRows";
@@ -239,6 +240,9 @@ interface MessagesTimelineProps {
   isCompacting?: boolean;
   canInterrupt?: boolean;
   onInterrupt?: () => void;
+  canResume?: boolean;
+  resumeDisabled?: boolean;
+  onResume?: () => void;
   awaitingUser?: "approval" | "input" | null;
   /** Which request is waiting, so a second one of the same kind is announced too. */
   awaitingRequestId?: string | null;
@@ -355,6 +359,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
   isCompacting = false,
   canInterrupt = false,
   onInterrupt,
+  canResume = false,
+  resumeDisabled = false,
+  onResume,
   awaitingUser = null,
   awaitingRequestId = null,
   listRef,
@@ -726,6 +733,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     unmatchedPendingApprovals.length === 0 &&
     !isWorking &&
     !canInterrupt &&
+    !canResume &&
     parentThreadLink === null &&
     historyControls === undefined &&
     footer === null;
@@ -1292,6 +1300,20 @@ const ConversationTimeline = memo(function ConversationTimeline({
             data-timeline-root="true"
           >
             <TimelineStopGenerationButton disabled={!canOperateThread} onInterrupt={onInterrupt} />
+          </div>
+        </div>
+      ) : !canInterrupt && canResume && onResume ? (
+        <div className="messages-timeline-row-frame">
+          <div
+            className="chat-content-lane flex justify-end overflow-x-clip pb-2"
+            data-timeline-root="true"
+          >
+            <TimelineResumeThreadButton
+              disabled={
+                !canOperateThread || isRevertingCheckpoint || isPreparingWorktree || resumeDisabled
+              }
+              onResume={onResume}
+            />
           </div>
         </div>
       ) : null}

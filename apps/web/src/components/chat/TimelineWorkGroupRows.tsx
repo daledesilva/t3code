@@ -11,7 +11,7 @@ import { memo, use, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { workEntryDisplayIndicatesToolFailure } from "../../session-logic";
 import ChatMarkdown from "../ChatMarkdown";
-import { Minimize2Icon, XIcon } from "lucide-react";
+import { Minimize2Icon, PlayIcon, XIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import {
@@ -379,6 +379,29 @@ export function TimelineStopGenerationButton({
         <rect x="2" y="2" width="8" height="8" rx="1.5" />
       </svg>
       <span>Stop</span>
+    </button>
+  );
+}
+
+export function TimelineResumeThreadButton({
+  disabled = false,
+  onResume,
+}: {
+  disabled?: boolean;
+  onResume: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="inline-flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-message-action px-3 font-medium text-sm text-message-action-foreground shadow-xs shadow-message-action/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-message-action-hover active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none [&_svg]:pointer-events-none"
+      disabled={disabled}
+      onClick={() => {
+        if (!disabled) onResume();
+      }}
+      aria-label="Resume thread"
+    >
+      <PlayIcon className="size-3.5 fill-current" aria-hidden="true" />
+      <span>Resume</span>
     </button>
   );
 }

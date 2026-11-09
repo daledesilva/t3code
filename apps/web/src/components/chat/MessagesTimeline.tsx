@@ -114,6 +114,8 @@ import {
   WorkGroupSection,
   WorkingTimelineRow,
   ThinkingTimelineRow,
+  TimelineStopGenerationButton,
+  TimelineResumeThreadButton,
   LiveWorkEntryTimelineRow,
   WorkGroupToggleTimelineRow,
 } from "./TimelineWorkGroupRows";
@@ -236,6 +238,11 @@ interface MessagesTimelineProps {
   onOpenWorktreeSetupTerminal?: (terminalId: string) => void;
   isPreparingWorktree?: boolean;
   isCompacting?: boolean;
+  canInterrupt?: boolean;
+  onInterrupt?: () => void;
+  canResume?: boolean;
+  resumeDisabled?: boolean;
+  onResume?: () => void;
   awaitingUser?: "approval" | "input" | null;
   /** Which request is waiting, so a second one of the same kind is announced too. */
   awaitingRequestId?: string | null;
@@ -350,6 +357,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onOpenWorktreeSetupTerminal,
   isPreparingWorktree = false,
   isCompacting = false,
+  canInterrupt = false,
+  onInterrupt,
+  canResume = false,
+  resumeDisabled = false,
+  onResume,
   awaitingUser = null,
   awaitingRequestId = null,
   listRef,
@@ -720,6 +732,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     rows.length === 0 &&
     unmatchedPendingApprovals.length === 0 &&
     !isWorking &&
+    !canInterrupt &&
+    !canResume &&
     parentThreadLink === null &&
     historyControls === undefined &&
     footer === null;
@@ -1076,6 +1090,20 @@ const ConversationTimeline = memo(function ConversationTimeline({
     latestRun?.startedAt != null
       ? worktreeSetup
       : null;
+  const lastTimelineRow = rows.at(-1);
+  const inlineStopRowId =
+    canInterrupt &&
+    onInterrupt !== undefined &&
+    unmatchedPendingApprovals.length === 0 &&
+    !compactionAwaitingRow &&
+    !isPreparingWorktree &&
+    lastTimelineRow !== undefined &&
+    ((lastTimelineRow.kind === "thinking" && pendingApprovalsByRequestId.size === 0) ||
+      (lastTimelineRow.kind === "work-live" &&
+        !lastTimelineRow.expanded &&
+        lastTimelineRow.entry.itemType === "reasoning"))
+      ? lastTimelineRow.id
+      : null;
   const activityState: TimelineRowActivityState = {
     isWorking,
     isCompacting: compactionAwaitingRow,
@@ -1086,6 +1114,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     latestRunId: latestRun?.runId ?? null,
     liveAnswerPreview:
       isWorking && toolCallVisibility === "zen" ? liveAnswerPreview(timelineEntries) : null,
+    inlineStopRowId,
+    onInterrupt: canInterrupt ? (onInterrupt ?? null) : null,
   };
   // Mounted in both the empty and filled timeline so a thread's first turn
   // starts from a baseline instead of a fresh, silent region.
@@ -1252,12 +1282,41 @@ const ConversationTimeline = memo(function ConversationTimeline({
       </div>
     </TimelineRowCtx>
   );
-  const listExtraData = { identity: listIdentityKey, rowCount: rows.length, sharedState };
+  const listExtraData = {
+    identity: listIdentityKey,
+    rowCount: rows.length,
+    sharedState,
+    inlineStopRowId,
+  };
   const timelineListFooter = (
     <TimelineListFooter
       composerInset={anchoredEndSpace ? 0 : contentInsetEndAdjustment}
       onGrow={onFooterGrow}
     >
+      {canInterrupt && onInterrupt && inlineStopRowId === null ? (
+        <div className="messages-timeline-row-frame">
+          <div
+            className="chat-content-lane flex justify-end overflow-x-clip pb-2"
+            data-timeline-root="true"
+          >
+            <TimelineStopGenerationButton disabled={!canOperateThread} onInterrupt={onInterrupt} />
+          </div>
+        </div>
+      ) : !canInterrupt && canResume && onResume ? (
+        <div className="messages-timeline-row-frame">
+          <div
+            className="chat-content-lane flex justify-end overflow-x-clip pb-2"
+            data-timeline-root="true"
+          >
+            <TimelineResumeThreadButton
+              disabled={
+                !canOperateThread || isRevertingCheckpoint || isPreparingWorktree || resumeDisabled
+              }
+              onResume={onResume}
+            />
+          </div>
+        </div>
+      ) : null}
       {footer}
       {unmatchedPendingApprovals.length > 0 ? (
         <TimelineRowCtx value={sharedState}>

@@ -269,6 +269,7 @@ import {
   buildFollowOnQueueLists,
   type FollowOnQueueServerUpdate,
   isSidebarThreadEligibleForFollowOnQueue,
+  planFollowOnQueueRemove,
   planFollowOnQueueReorder,
   planSidebarDropIntoFollowOnQueue,
   toFollowOnQueueItem,
@@ -3155,6 +3156,12 @@ export default function ChatView(props: ChatViewProps) {
     (candidate) => candidate.environmentId === environmentId,
   );
   const activeStartAfterThreadId = activeThread?.startAfterThreadId ?? null;
+  // A thread waiting on a prior thread shows its queued message as the dashed queue row below
+  // the follow-on queue, so the timeline leaves the same message out rather than show it twice.
+  const waitingQueuedMessageIds =
+    serverProjection !== null && activeStartAfterThreadId !== null
+      ? new Set(getUserQueuedThreadRuns(serverProjection).map((run) => run.userMessageId))
+      : undefined;
   const { beforeQueue: followOnBeforeQueue, afterQueue: followOnAfterQueue } =
     buildFollowOnQueueLists({
       threads: environmentThreads,
@@ -3199,19 +3206,37 @@ export default function ChatView(props: ChatViewProps) {
       }
     }
   };
-  const handleClearFollowOnQueue = () => {
+  const handleRemoveFollowOnQueueItem = (removedThreadId: ThreadId) => {
+    const plan = planFollowOnQueueRemove({
+      beforeQueue: followOnBeforeQueue,
+      afterQueue: followOnAfterQueue,
+      removedThreadId,
+    });
+    if (!plan) return;
+    void applyFollowOnServerUpdates(plan.serverUpdates);
     if (!isServerThread) {
-      setDraftThreadContext(composerDraftTarget, { startAfterThreadId: null });
-      return;
-    }
-    if (activeThreadId !== null) {
-      void clearThreadStartAfter({
-        environmentId,
-        input: { threadId: activeThreadId, createdAt: new Date().toISOString() },
+      setDraftThreadContext(composerDraftTarget, {
+        startAfterThreadId: plan.nextPriorThreadId,
       });
+    } else if (activeThreadId !== null && plan.nextPriorThreadId !== activeStartAfterThreadId) {
+      if (plan.nextPriorThreadId === null) {
+        void clearThreadStartAfter({
+          environmentId,
+          input: { threadId: activeThreadId, createdAt: new Date().toISOString() },
+        });
+      } else {
+        void reorderThreadStartAfter({
+          environmentId,
+          input: {
+            threadId: activeThreadId,
+            startAfterThreadId: plan.nextPriorThreadId,
+            createdAt: new Date().toISOString(),
+          },
+        });
+      }
     }
   };
-  const handleClearFollowOnQueueStable = useStableCallback(handleClearFollowOnQueue);
+  const handleRemoveFollowOnQueueItemStable = useStableCallback(handleRemoveFollowOnQueueItem);
   const handleReorderFollowOnQueue = (input: {
     readonly movedThreadId: ThreadId;
     readonly targetList: "before" | "after";
@@ -3269,10 +3294,10 @@ export default function ChatView(props: ChatViewProps) {
   const handleDropSidebarThreadIntoQueueStable = useStableCallback(
     handleDropSidebarThreadIntoQueue,
   );
+  // Only the queue before this thread shows here; the threads that follow it are not listed,
+  // which also keeps the thread from splitting its queue in two.
   const hasServerFollowOnQueue =
-    isServerThread &&
-    activeStartAfterThreadId !== null &&
-    (followOnBeforeQueue.length > 0 || followOnAfterQueue.length > 0);
+    isServerThread && activeStartAfterThreadId !== null && followOnBeforeQueue.length > 0;
   // The end of the timeline holds the thread's present and next turns: what it is doing now,
   // its lifecycle status, guest messages awaiting you, then your queued messages.
   const timelineFooter =
@@ -3316,22 +3341,19 @@ export default function ChatView(props: ChatViewProps) {
               beforeQueue={followOnBeforeQueue}
               afterQueue={followOnAfterQueue}
               canOperate={canOperateThread}
-              onClearQueue={handleClearFollowOnQueueStable}
+              onRemoveItem={handleRemoveFollowOnQueueItemStable}
               onReorderQueue={handleReorderFollowOnQueueStable}
             />
-            {followOnAfterQueue.length > 0 ? (
-              <FollowOnQueueSection
-                section="after"
-                environmentId={environmentId}
-                beforeQueue={followOnBeforeQueue}
-                afterQueue={followOnAfterQueue}
-                canOperate={canOperateThread}
-                onReorderQueue={handleReorderFollowOnQueueStable}
-              />
-            ) : null}
           </div>
         ) : null}
-        {hasQueuedTurns ? queuedRunsControl : null}
+        {hasQueuedTurns ? (
+          hasServerFollowOnQueue ? (
+            // The timeline hides this message while it waits, so add the gap the queue has above it.
+            <div className="mt-12">{queuedRunsControl}</div>
+          ) : (
+            queuedRunsControl
+          )
+        ) : null}
       </>
     );
 
@@ -3632,6 +3654,7 @@ export default function ChatView(props: ChatViewProps) {
                   {...(onOpenWorktreeSetupTerminal ? { onOpenWorktreeSetupTerminal } : {})}
                   isPreparingWorktree={isPreparingWorktree}
                   footer={timelineFooter}
+                  hiddenMessageIds={waitingQueuedMessageIds}
                   listRef={legendListRef}
                   runs={serverProjection?.runs ?? []}
                   latestRun={activeActivityRun}
@@ -3727,15 +3750,16 @@ export default function ChatView(props: ChatViewProps) {
                         }
                       >
                         {followOnBeforeQueue.length > 0 || isDraggingWorkingSidebarThread ? (
-                          <div className="mb-4">
+                          <div className="mb-8">
                             <FollowOnQueueSection
                               section="before"
+                              newThread
                               environmentId={environmentId}
                               beforeQueue={followOnBeforeQueue}
                               afterQueue={followOnAfterQueue}
                               isSidebarDragging={isDraggingWorkingSidebarThread}
                               canOperate={canOperateThread}
-                              onClearQueue={handleClearFollowOnQueueStable}
+                              onRemoveItem={handleRemoveFollowOnQueueItemStable}
                               onReorderQueue={handleReorderFollowOnQueueStable}
                               onDropSidebarThread={handleDropSidebarThreadIntoQueueStable}
                             />
@@ -4035,14 +4059,16 @@ export default function ChatView(props: ChatViewProps) {
                         // Out of flow, like the headline, so a notice never moves the centered composer.
                         // Short windows pin the composer to the bottom, where an out-of-flow notice
                         // would fall off-screen, so there it takes space and lifts the composer.
-                        <div className="absolute inset-x-0 top-full flex flex-col gap-3 pt-4 [@media(max-height:34rem)]:static">
+                        <div className="absolute inset-x-0 top-full flex flex-col gap-3 pt-8 [@media(max-height:34rem)]:static">
                           {followOnAfterQueue.length > 0 ? (
                             <FollowOnQueueSection
                               section="after"
+                              newThread
                               environmentId={environmentId}
                               beforeQueue={followOnBeforeQueue}
                               afterQueue={followOnAfterQueue}
                               canOperate={canOperateThread}
+                              onRemoveItem={handleRemoveFollowOnQueueItemStable}
                               onReorderQueue={handleReorderFollowOnQueueStable}
                             />
                           ) : null}

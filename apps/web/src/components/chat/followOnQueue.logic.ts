@@ -181,6 +181,35 @@ function computeServerChainUpdates(
 }
 
 /**
+ * Removes one thread from the queue. It stops following anything, and the threads on either
+ * side of it are re-linked. `nextPriorThreadId` is the new last thread before the viewed thread,
+ * or `null` when nothing is left to follow.
+ */
+export function planFollowOnQueueRemove(input: {
+  readonly beforeQueue: ReadonlyArray<FollowOnQueueItem>;
+  readonly afterQueue: ReadonlyArray<FollowOnQueueItem>;
+  readonly removedThreadId: ThreadId;
+}): FollowOnQueuePlan | null {
+  const { beforeQueue, afterQueue, removedThreadId } = input;
+  const allItems = [...beforeQueue, ...afterQueue];
+  const removedItem = allItems.find((item) => item.id === removedThreadId);
+  if (!removedItem) return null;
+
+  const nextBefore = beforeQueue.filter((item) => item.id !== removedThreadId);
+  const nextAfter = afterQueue.filter((item) => item.id !== removedThreadId);
+  const relinkUpdates = computeServerChainUpdates(allItems, [...nextBefore, ...nextAfter]);
+  const detachUpdate: ReadonlyArray<FollowOnQueueServerUpdate> =
+    removedItem.startAfterThreadId === null
+      ? []
+      : [{ threadId: removedItem.id, startAfterThreadId: null, kind: "clear" }];
+
+  return {
+    nextPriorThreadId: nextBefore.at(-1)?.id ?? null,
+    serverUpdates: [...detachUpdate, ...relinkUpdates],
+  };
+}
+
+/**
  * Reorders an item within or across `beforeQueue` and `afterQueue`.
  * The running head (when `beforeQueue[0]?.isRunning` is true) stays at index 0.
  */

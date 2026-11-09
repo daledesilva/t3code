@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildFollowOnQueueLists,
   type FollowOnQueueThreadInput,
+  planFollowOnQueueRemove,
   planFollowOnQueueReorder,
   planSidebarDropIntoFollowOnQueue,
   toFollowOnQueueItem,
@@ -185,6 +186,90 @@ describe("planFollowOnQueueReorder", () => {
         movedThreadId: threadA.id,
         targetList: "before",
         targetIndex: 1,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("planFollowOnQueueRemove", () => {
+  const threadA = toFollowOnQueueItem(
+    makeQueueThread({
+      id: "thread-a",
+      runtime: {
+        status: "running",
+        providerName: "Codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        activeRunId: "run-a" as never,
+        lastError: null,
+        updatedAt: "2026-03-09T10:00:00.000Z",
+      },
+    }),
+  );
+  const threadB = toFollowOnQueueItem(
+    makeQueueThread({ id: "thread-b", startAfterThreadId: threadA.id }),
+  );
+  const threadC = toFollowOnQueueItem(
+    makeQueueThread({ id: "thread-c", startAfterThreadId: threadB.id }),
+  );
+
+  it("removes the running head and detaches the next thread so it starts on its own", () => {
+    expect(
+      planFollowOnQueueRemove({
+        beforeQueue: [threadA, threadB],
+        afterQueue: [],
+        removedThreadId: threadA.id,
+      }),
+    ).toEqual({
+      nextPriorThreadId: threadB.id,
+      serverUpdates: [{ threadId: threadB.id, startAfterThreadId: null, kind: "clear" }],
+    });
+  });
+
+  it("removes the last waiting thread and leaves the one before it as the prior", () => {
+    expect(
+      planFollowOnQueueRemove({
+        beforeQueue: [threadA, threadB],
+        afterQueue: [],
+        removedThreadId: threadB.id,
+      }),
+    ).toEqual({
+      nextPriorThreadId: threadA.id,
+      serverUpdates: [{ threadId: threadB.id, startAfterThreadId: null, kind: "clear" }],
+    });
+  });
+
+  it("removes the only thread, leaving nothing to follow", () => {
+    expect(
+      planFollowOnQueueRemove({
+        beforeQueue: [threadA],
+        afterQueue: [],
+        removedThreadId: threadA.id,
+      }),
+    ).toEqual({ nextPriorThreadId: null, serverUpdates: [] });
+  });
+
+  it("removes a thread from the afterQueue and re-links the thread behind it", () => {
+    const plan = planFollowOnQueueRemove({
+      beforeQueue: [threadA],
+      afterQueue: [threadB, threadC],
+      removedThreadId: threadB.id,
+    });
+
+    expect(plan).toEqual({
+      nextPriorThreadId: threadA.id,
+      serverUpdates: [
+        { threadId: threadB.id, startAfterThreadId: null, kind: "clear" },
+        { threadId: threadC.id, startAfterThreadId: threadA.id, kind: "reorder" },
+      ],
+    });
+  });
+
+  it("ignores a thread that is not in the queue", () => {
+    expect(
+      planFollowOnQueueRemove({
+        beforeQueue: [threadA],
+        afterQueue: [],
+        removedThreadId: threadC.id,
       }),
     ).toBeNull();
   });

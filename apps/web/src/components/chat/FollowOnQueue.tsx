@@ -18,7 +18,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
-import { CircleDashedIcon, CircleDotDashedIcon, GripVerticalIcon, XIcon } from "lucide-react";
+import { CircleDashedIcon, CircleDotDashedIcon, GripVerticalIcon } from "lucide-react";
 import { useRef } from "react";
 
 import { cn } from "~/lib/utils";
@@ -27,6 +27,10 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { type FollowOnQueueItem, planFollowOnQueueReorder } from "./followOnQueue.logic";
 import { threadContextDropTargetProps, useThreadContextDrop } from "./threadContextDrag";
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 function QueueDropSlot({
   environmentId,
@@ -74,9 +78,11 @@ function QueueDropSlot({
 function SortableQueueItemRow({
   item,
   canReorder,
+  onRemove,
 }: {
   readonly item: FollowOnQueueItem;
   readonly canReorder: boolean;
+  readonly onRemove?: ((threadId: ThreadId) => void) | undefined;
 }) {
   const disabled = !canReorder || item.isRunning;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -91,7 +97,8 @@ function SortableQueueItemRow({
       data-testid={`follow-on-queue-item-${item.id}`}
       data-running={item.isRunning ? "true" : "false"}
       className={cn(
-        "group/queue-item flex items-center gap-2 rounded-md border border-border/60 bg-card/75 px-2.5 py-1.5 text-xs transition-colors hover:bg-accent/50",
+        "group/queue-item flex items-center gap-2 rounded-md border border-border/60 bg-card/75 px-2.5 text-xs transition-colors hover:bg-accent/50",
+        onRemove ? "py-1" : "py-1.5",
         isDragging && "relative z-10 bg-background shadow-md",
       )}
     >
@@ -132,6 +139,17 @@ function SortableQueueItemRow({
           Waiting
         </span>
       )}
+
+      {onRemove ? (
+        <Button
+          size="micro"
+          variant="ghost-muted"
+          aria-label={`Remove ${item.title} from the queue`}
+          onClick={() => onRemove(item.id)}
+        >
+          Remove
+        </Button>
+      ) : null}
     </li>
   );
 }
@@ -143,7 +161,8 @@ export function FollowOnQueueSection({
   afterQueue,
   isSidebarDragging = false,
   canOperate = true,
-  onClearQueue,
+  newThread = false,
+  onRemoveItem,
   onReorderQueue,
   onDropSidebarThread,
 }: {
@@ -153,7 +172,9 @@ export function FollowOnQueueSection({
   readonly afterQueue: ReadonlyArray<FollowOnQueueItem>;
   readonly isSidebarDragging?: boolean | undefined;
   readonly canOperate?: boolean | undefined;
-  readonly onClearQueue?: (() => void) | undefined;
+  /** The viewed thread is an unsent draft, which changes how the queue tooltips read. */
+  readonly newThread?: boolean | undefined;
+  readonly onRemoveItem?: ((threadId: ThreadId) => void) | undefined;
   readonly onReorderQueue: (input: {
     readonly movedThreadId: ThreadId;
     readonly targetList: "before" | "after";
@@ -176,6 +197,13 @@ export function FollowOnQueueSection({
     return null;
   }
 
+  const subject = newThread ? "your new thread" : "this thread";
+  const title = section === "before" ? "Follow on from" : "Follow up with";
+  const hint =
+    section === "before"
+      ? `${capitalize(subject)} will start after these threads complete.`
+      : `These threads will start after ${subject} completes.`;
+  const removeItem = canOperate ? onRemoveItem : undefined;
   const itemIds = items.map((item) => item.id);
   const canReorder =
     canOperate &&
@@ -208,25 +236,15 @@ export function FollowOnQueueSection({
       data-testid={`follow-on-queue-${section}`}
       className="pointer-events-auto mx-auto w-full max-w-md"
     >
-      <div className="mb-1.5 flex items-center justify-between gap-2 px-0.5">
-        <span className="text-xs font-medium text-muted-foreground">Queue</span>
-        {section === "before" && items.length > 0 && onClearQueue && canOperate ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-xs"
-                  variant="ghost-muted"
-                  aria-label="Remove from queue"
-                  onClick={onClearQueue}
-                />
-              }
-            >
-              <XIcon className="size-3" />
-            </TooltipTrigger>
-            <TooltipPopup side="top">Remove from queue</TooltipPopup>
-          </Tooltip>
-        ) : null}
+      <div className="mb-1.5 flex items-center gap-2 px-0.5">
+        <Tooltip>
+          <TooltipTrigger
+            render={<span className="cursor-default text-xs font-medium text-muted-foreground" />}
+          >
+            {title}
+          </TooltipTrigger>
+          <TooltipPopup side="top">{hint}</TooltipPopup>
+        </Tooltip>
       </div>
 
       {section === "before" && items.length === 0 ? (
@@ -252,10 +270,10 @@ export function FollowOnQueueSection({
                 onDropThreads={(refs) => onDropSidebarThread(refs, 0)}
               />
             ) : null}
-            <ol aria-label="Queue" className="flex flex-col gap-1">
+            <ol aria-label={title} className="flex flex-col gap-1">
               {items.map((item, index) => (
                 <div key={item.id} className="flex flex-col gap-1">
-                  <SortableQueueItemRow item={item} canReorder={canReorder} />
+                  <SortableQueueItemRow item={item} canReorder={canReorder} onRemove={removeItem} />
                   {section === "before" && isSidebarDragging && onDropSidebarThread ? (
                     <QueueDropSlot
                       environmentId={environmentId}

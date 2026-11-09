@@ -197,6 +197,8 @@ import {
   resolveSidebarDropTarget,
   resolveSidebarDropVerb,
   resolveSidebarThreadSection,
+  // Fixes right-clicking threads in the dev server: handleThreadContextMenu calls this, and the missing import threw before the menu opened.
+  resolveSidebarThreadStatus,
   resolveSidebarReorderableThreadKeys,
   searchSidebarThreads,
   shouldCreateNewThreadInCurrentProject,

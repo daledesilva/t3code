@@ -265,7 +265,7 @@ export function unansweredQuestionTakeoverText(
         )
         .join("\n");
       return [question.header, question.question, options]
-        .filter((line) => line.length > 0)
+        .filter((line) => (line ?? "").length > 0)
         .join("\n");
     })
     .join("\n\n");

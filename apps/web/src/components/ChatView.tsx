@@ -3165,13 +3165,7 @@ export default function ChatView(props: ChatViewProps) {
             questionIndex={activePendingQuestionIndex}
             onToggleOption={onSelectActivePendingUserInputOptionStable}
             onChangeCustomAnswer={(questionId, value) =>
-              onChangeActivePendingUserInputCustomAnswer(
-                questionId,
-                value,
-                value.length,
-                value.length,
-                false,
-              )
+              onChangeActivePendingUserInputCustomAnswer(questionId, value)
             }
             onAdvance={onAdvanceActivePendingUserInputStable}
             onPrevious={onPreviousActivePendingUserInputQuestionStable}

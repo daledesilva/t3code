@@ -259,10 +259,23 @@ import {
   useThreadHistory,
   useQuietThreadShell,
   useThreadCheckpointSummaries,
+  useVisibleThreadShells,
 } from "../state/entities";
 import { useEnvironmentShellHasSnapshot } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
+import { FollowOnQueueSection } from "./chat/FollowOnQueue";
+import {
+  buildFollowOnQueueLists,
+  existingThreadCanQueueBehindPredecessor,
+  type FollowOnQueueServerUpdate,
+  isSidebarThreadEligibleForFollowOnQueue,
+  planFollowOnQueueRemove,
+  planFollowOnQueueReorder,
+  planSidebarDropIntoFollowOnQueue,
+  toFollowOnQueueItem,
+} from "./chat/followOnQueue.logic";
+import { useThreadContextDragGhost } from "./chat/threadContextDrag";
 import { ExpandedImageDialogHost, openExpandedImagePreview } from "./chat/ExpandedImageDialog";
 import {
   BranchRestoreConfirmHost,
@@ -3130,6 +3143,185 @@ export default function ChatView(props: ChatViewProps) {
     [childInputNow?.waitingLabel ?? null, queuedRunCount === 0 ? null : `${queuedRunCount} queued`]
       .filter((part) => part !== null)
       .join(" · ") || null;
+  const setThreadStartAfter = useOrchestrationCommand(threadEnvironment.setStartAfter, {
+    reportFailure: false,
+  });
+  const reorderThreadStartAfter = useOrchestrationCommand(threadEnvironment.reorderStartAfter, {
+    reportFailure: false,
+  });
+  const clearThreadStartAfter = useOrchestrationCommand(threadEnvironment.clearStartAfter, {
+    reportFailure: false,
+  });
+  const visibleThreadShells = useVisibleThreadShells();
+  const environmentThreads = visibleThreadShells.filter(
+    (candidate) => candidate.environmentId === environmentId,
+  );
+  const activeStartAfterThreadId = activeThread?.startAfterThreadId ?? null;
+  // A thread waiting on a prior thread shows its queued message once, in the timeline footer.
+  const waitingQueuedMessageIds =
+    serverProjection !== null && activeStartAfterThreadId !== null
+      ? new Set(getUserQueuedThreadRuns(serverProjection).map((run) => run.userMessageId))
+      : undefined;
+  const { beforeQueue: followOnBeforeQueue, afterQueue: followOnAfterQueue } =
+    buildFollowOnQueueLists({
+      threads: environmentThreads,
+      priorThreadId: activeStartAfterThreadId,
+      currentThreadId: isServerThread ? activeThreadId : null,
+    });
+  const canQueueExistingThread =
+    isServerThread &&
+    !isProviderSubagent &&
+    canOperateThread &&
+    existingThreadCanQueueBehindPredecessor(activeRuntime?.status);
+  const threadContextDragGhost = useThreadContextDragGhost();
+  const isDraggingEligibleSidebarThread =
+    threadContextDragGhost?.threads?.some((ref) => {
+      if (ref.environmentId !== environmentId || ref.threadId === activeThreadId) return false;
+      const shell = environmentThreads.find((candidate) => candidate.id === ref.threadId);
+      return shell !== undefined && isSidebarThreadEligibleForFollowOnQueue(shell);
+    }) ?? false;
+  const isDraggingWorkingSidebarThread =
+    isDraggingEligibleSidebarThread && (!isServerThread || canQueueExistingThread);
+  const showDockedFollowOnQueue =
+    !isDraftHeroState && (followOnBeforeQueue.length > 0 || isDraggingWorkingSidebarThread);
+  const applyFollowOnServerUpdates = async (updates: ReadonlyArray<FollowOnQueueServerUpdate>) => {
+    for (const update of updates) {
+      if (update.kind === "clear") {
+        await clearThreadStartAfter({
+          environmentId,
+          input: { threadId: update.threadId, createdAt: new Date().toISOString() },
+        });
+      } else if (update.kind === "reorder" && update.startAfterThreadId !== null) {
+        await reorderThreadStartAfter({
+          environmentId,
+          input: {
+            threadId: update.threadId,
+            startAfterThreadId: update.startAfterThreadId,
+            createdAt: new Date().toISOString(),
+          },
+        });
+      } else if (update.kind === "set" && update.startAfterThreadId !== null) {
+        await setThreadStartAfter({
+          environmentId,
+          input: {
+            threadId: update.threadId,
+            startAfterThreadId: update.startAfterThreadId,
+            createdAt: new Date().toISOString(),
+          },
+        });
+      }
+    }
+  };
+  const handleRemoveFollowOnQueueItem = (removedThreadId: ThreadId) => {
+    const plan = planFollowOnQueueRemove({
+      beforeQueue: followOnBeforeQueue,
+      afterQueue: followOnAfterQueue,
+      removedThreadId,
+    });
+    if (!plan) return;
+    void applyFollowOnServerUpdates(plan.serverUpdates);
+    if (!isServerThread) {
+      setDraftThreadContext(composerDraftTarget, {
+        startAfterThreadId: plan.nextPriorThreadId,
+      });
+    } else if (activeThreadId !== null && plan.nextPriorThreadId !== activeStartAfterThreadId) {
+      if (plan.nextPriorThreadId === null) {
+        void clearThreadStartAfter({
+          environmentId,
+          input: { threadId: activeThreadId, createdAt: new Date().toISOString() },
+        });
+      } else {
+        void reorderThreadStartAfter({
+          environmentId,
+          input: {
+            threadId: activeThreadId,
+            startAfterThreadId: plan.nextPriorThreadId,
+            createdAt: new Date().toISOString(),
+          },
+        });
+      }
+    }
+  };
+  const handleRemoveFollowOnQueueItemStable = useStableCallback(handleRemoveFollowOnQueueItem);
+  const handleReorderFollowOnQueue = (input: {
+    readonly movedThreadId: ThreadId;
+    readonly targetList: "before" | "after";
+    readonly targetIndex: number;
+  }) => {
+    const plan = planFollowOnQueueReorder({
+      beforeQueue: followOnBeforeQueue,
+      afterQueue: followOnAfterQueue,
+      ...input,
+    });
+    if (!plan) return;
+    void applyFollowOnServerUpdates(plan.serverUpdates);
+    if (!isServerThread) {
+      setDraftThreadContext(composerDraftTarget, {
+        startAfterThreadId: plan.nextPriorThreadId,
+      });
+    } else if (
+      activeThreadId !== null &&
+      plan.nextPriorThreadId !== null &&
+      plan.nextPriorThreadId !== activeStartAfterThreadId
+    ) {
+      void reorderThreadStartAfter({
+        environmentId,
+        input: {
+          threadId: activeThreadId,
+          startAfterThreadId: plan.nextPriorThreadId,
+          createdAt: new Date().toISOString(),
+        },
+      });
+    }
+  };
+  const handleReorderFollowOnQueueStable = useStableCallback(handleReorderFollowOnQueue);
+  const handleDropSidebarThreadIntoQueue = (
+    refs: ReadonlyArray<ScopedThreadRef>,
+    insertIndex: number,
+  ) => {
+    if (isServerThread && !canQueueExistingThread) return;
+    const droppedRef = refs.find((ref) => ref.environmentId === environmentId);
+    if (!droppedRef || droppedRef.threadId === activeThreadId) return;
+    const droppedShell = environmentThreads.find(
+      (candidate) => candidate.id === droppedRef.threadId,
+    );
+    if (!droppedShell || !isSidebarThreadEligibleForFollowOnQueue(droppedShell)) return;
+    const plan = planSidebarDropIntoFollowOnQueue({
+      beforeQueue: followOnBeforeQueue,
+      afterQueue: followOnAfterQueue,
+      droppedThread: toFollowOnQueueItem(droppedShell),
+      insertIndex,
+    });
+    void applyFollowOnServerUpdates(plan.serverUpdates);
+    if (!isServerThread) {
+      setDraftThreadContext(composerDraftTarget, {
+        startAfterThreadId: plan.nextPriorThreadId,
+      });
+      return;
+    }
+    if (
+      activeThreadId === null ||
+      plan.nextPriorThreadId === null ||
+      plan.nextPriorThreadId === activeStartAfterThreadId
+    ) {
+      return;
+    }
+    const persistPrior =
+      activeStartAfterThreadId === null ? setThreadStartAfter : reorderThreadStartAfter;
+    void persistPrior({
+      environmentId,
+      input: {
+        threadId: activeThreadId,
+        startAfterThreadId: plan.nextPriorThreadId,
+        createdAt: new Date().toISOString(),
+      },
+    });
+  };
+  const handleDropSidebarThreadIntoQueueStable = useStableCallback(
+    handleDropSidebarThreadIntoQueue,
+  );
+  // Queued prompts sit under the wait-for list when that list is pinned above the composer.
+  const showQueuedTurnsInTimeline = hasQueuedTurns && !showDockedFollowOnQueue;
   // The end of the timeline holds the thread's present and next turns: what it is doing now,
   // its lifecycle status, guest messages awaiting you, then your queued messages.
   const timelineFooter =
@@ -3137,7 +3329,7 @@ export default function ChatView(props: ChatViewProps) {
     !hasThreadNow &&
     threadStatusLine === null &&
     pendingGuestMessageCount === 0 &&
-    !hasQueuedTurns ? null : (
+    !showQueuedTurnsInTimeline ? null : (
       <>
         {pendingHandoff === null ? null : (
           <div className="chat-content-lane">
@@ -3164,7 +3356,7 @@ export default function ChatView(props: ChatViewProps) {
             onFileOpen={openFileAttachmentStable}
           />
         ) : null}
-        {hasQueuedTurns ? queuedRunsControl : null}
+        {showQueuedTurnsInTimeline ? queuedRunsControl : null}
       </>
     );
 
@@ -3465,6 +3657,7 @@ export default function ChatView(props: ChatViewProps) {
                   {...(onOpenWorktreeSetupTerminal ? { onOpenWorktreeSetupTerminal } : {})}
                   isPreparingWorktree={isPreparingWorktree}
                   footer={timelineFooter}
+                  hiddenMessageIds={waitingQueuedMessageIds}
                   listRef={legendListRef}
                   runs={serverProjection?.runs ?? []}
                   latestRun={activeActivityRun}
@@ -3549,6 +3742,26 @@ export default function ChatView(props: ChatViewProps) {
                   data-chat-composer-stack="true"
                   className="group/composer-stack pointer-events-auto relative z-10 mx-auto w-full max-w-(--chat-content-max-width)"
                 >
+                  {showDockedFollowOnQueue ? (
+                    <div className="mt-5 mb-6">
+                      <FollowOnQueueSection
+                        section="before"
+                        environmentId={environmentId}
+                        beforeQueue={followOnBeforeQueue}
+                        afterQueue={followOnAfterQueue}
+                        isSidebarDragging={isDraggingWorkingSidebarThread}
+                        canOperate={canOperateThread}
+                        onRemoveItem={handleRemoveFollowOnQueueItemStable}
+                        onReorderQueue={handleReorderFollowOnQueueStable}
+                        onDropSidebarThread={
+                          !isServerThread || canQueueExistingThread
+                            ? handleDropSidebarThreadIntoQueueStable
+                            : undefined
+                        }
+                      />
+                    </div>
+                  ) : null}
+                  {showDockedFollowOnQueue && hasQueuedTurns ? queuedRunsControl : null}
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full">
                       <div
@@ -3559,6 +3772,22 @@ export default function ChatView(props: ChatViewProps) {
                             : undefined
                         }
                       >
+                        {followOnBeforeQueue.length > 0 || isDraggingWorkingSidebarThread ? (
+                          <div className="mb-8">
+                            <FollowOnQueueSection
+                              section="before"
+                              newThread
+                              environmentId={environmentId}
+                              beforeQueue={followOnBeforeQueue}
+                              afterQueue={followOnAfterQueue}
+                              isSidebarDragging={isDraggingWorkingSidebarThread}
+                              canOperate={canOperateThread}
+                              onRemoveItem={handleRemoveFollowOnQueueItemStable}
+                              onReorderQueue={handleReorderFollowOnQueueStable}
+                              onDropSidebarThread={handleDropSidebarThreadIntoQueueStable}
+                            />
+                          </div>
+                        ) : null}
                         <DraftHeroHeadline
                           draftId={draftId}
                           activeProjectRef={activeProjectRef}
@@ -3848,12 +4077,27 @@ export default function ChatView(props: ChatViewProps) {
                           </div>
                         </div>
                       </ComposerSurface.Shell>
-                      {isDraftHeroState && composerBannerItems.length > 0 ? (
+                      {isDraftHeroState &&
+                      (composerBannerItems.length > 0 || followOnAfterQueue.length > 0) ? (
                         // Out of flow, like the headline, so a notice never moves the centered composer.
                         // Short windows pin the composer to the bottom, where an out-of-flow notice
                         // would fall off-screen, so there it takes space and lifts the composer.
-                        <div className="absolute inset-x-0 top-full flex flex-col gap-1 pt-4 [@media(max-height:34rem)]:static">
-                          <ComposerBannerStack items={composerBannerItems} detached />
+                        <div className="absolute inset-x-0 top-full flex flex-col gap-3 pt-8 [@media(max-height:34rem)]:static">
+                          {followOnAfterQueue.length > 0 ? (
+                            <FollowOnQueueSection
+                              section="after"
+                              newThread
+                              environmentId={environmentId}
+                              beforeQueue={followOnBeforeQueue}
+                              afterQueue={followOnAfterQueue}
+                              canOperate={canOperateThread}
+                              onRemoveItem={handleRemoveFollowOnQueueItemStable}
+                              onReorderQueue={handleReorderFollowOnQueueStable}
+                            />
+                          ) : null}
+                          {composerBannerItems.length > 0 ? (
+                            <ComposerBannerStack items={composerBannerItems} detached />
+                          ) : null}
                         </div>
                       ) : null}
                     </div>

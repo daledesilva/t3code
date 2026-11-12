@@ -88,6 +88,7 @@ export interface ThreadLaunchInput {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
+  readonly startAfterThreadId?: ThreadId | null;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   readonly importedNativeThread?: {
     readonly ref: {
@@ -941,6 +942,9 @@ const make = Effect.gen(function* () {
                 interactionMode: input.interactionMode,
                 branch: initialBranch,
                 worktreePath: initialWorktreePath,
+                ...(input.startAfterThreadId === undefined
+                  ? {}
+                  : { startAfterThreadId: input.startAfterThreadId }),
                 ...(input.importedNativeThread === undefined
                   ? {}
                   : { importedNativeThread: input.importedNativeThread }),
@@ -963,6 +967,16 @@ const make = Effect.gen(function* () {
         const threadId =
           claimed.storedEvents.find((stored) => stored.event.type.startsWith("thread."))?.event
             .threadId ?? candidateThreadId;
+        if (input.reuseExistingThread === true && input.startAfterThreadId != null) {
+          yield* threads
+            .dispatch({
+              type: "thread.start-after.set",
+              commandId: CommandId.make(`${input.commandId}:start-after`),
+              threadId,
+              startAfterThreadId: input.startAfterThreadId,
+            })
+            .pipe(Effect.mapError(mapError(input, "update-thread", threadId)));
+        }
         if (project.id !== input.projectId) {
           return yield* mapError(input, "resolve-project", threadId)("Project identity changed.");
         }

@@ -38,6 +38,7 @@ export interface ThreadContextDragGhost {
   readonly y: number;
   readonly title: string;
   readonly count: number;
+  readonly threads?: ReadonlyArray<ScopedThreadRef> | undefined;
 }
 
 let ghost: ThreadContextDragGhost | null = null;
@@ -72,7 +73,11 @@ function findDropTarget(point: { x: number; y: number }): HTMLElement | null {
 
 export function moveThreadContextDrag(
   point: { x: number; y: number },
-  label: { title: string; count: number },
+  label: {
+    title: string;
+    count: number;
+    threads?: ReadonlyArray<ScopedThreadRef> | undefined;
+  },
 ) {
   const target = findDropTarget(point);
   if (target !== overTarget) {

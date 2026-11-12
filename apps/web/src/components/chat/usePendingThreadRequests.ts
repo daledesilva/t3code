@@ -2,9 +2,11 @@ import type { ThreadStructure } from "@t3tools/client-runtime/state/shell";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
+  type ModelSelection,
   type ProviderApprovalDecision,
+  type ProviderInteractionMode,
+  type RuntimeMode,
   type RuntimeRequestId,
-  type ScopedThreadRef,
   type ThreadId,
   type UserInputAttachments,
 } from "@t3tools/contracts";
@@ -20,22 +22,22 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { create } from "zustand";
-import { useRef, useState, type RefObject, type SetStateAction } from "react";
+import { useRef, useState, type SetStateAction } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { type DraftId, useComposerDraftStore } from "../../composerDraftStore";
+import { useComposerDraftStore } from "../../composerDraftStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { getUploadedAttachments, useAttachmentUploadStore } from "../../lib/attachmentUploadQueue";
 import {
   buildPendingUserInputAnswers,
+  formatQueuedQuestionAnswers,
+  questionSetUsesCustomAnswer,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
 } from "@t3tools/client-runtime/state/pending-user-input";
 import {
-  carryDisplacedCustomAnswerIntoPrompt,
   derivePendingUserInputProgress,
   projectPendingUserInputAnswer,
-  threadContextsReferencedByAnswer,
 } from "../../pendingUserInput";
 import {
   questionAttachmentDraftId,
@@ -50,9 +52,7 @@ import { readEnvironmentScope } from "../../state/session";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
-import { toastManager } from "../ui/toast";
-
-import type { ChatComposerHandle } from "./ChatComposer";
+import { newMessageId } from "~/lib/utils";
 
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 const usePendingUserInputAnswers = create<
@@ -82,7 +82,6 @@ onThreadRequestsResolved(({ environmentId, threadId, pendingRequestIds }) => {
 function makePendingCustomAnswerSetter(input: {
   readonly activePendingUserInput: PendingUserInput | null;
   readonly activePendingRequestKey: string;
-  readonly writePrompt: (prompt: string) => void;
   readonly setPendingUserInputAnswersByRequestId: (
     update: SetStateAction<Record<string, Record<string, PendingUserInputDraftAnswer>>>,
   ) => void;
@@ -93,10 +92,9 @@ function makePendingCustomAnswerSetter(input: {
       return;
     }
     const question = activePendingUserInput.questions.find((entry) => entry.id === questionId);
-    if (!question || question.allowCustomAnswer === false) {
+    if (!question) {
       return;
     }
-    input.writePrompt(value);
     input.setPendingUserInputAnswersByRequestId((existing) => ({
       ...existing,
       [activePendingRequestKey]: {
@@ -117,22 +115,20 @@ export function usePendingThreadRequests(input: {
   readonly activeThreadId: ThreadId | null;
   readonly serverProjection: ThreadStructure | null;
   readonly supportsQuestionAttachments: boolean;
-  readonly composerDraftTarget: ScopedThreadRef | DraftId;
-  readonly setComposerDraftPrompt: (target: ScopedThreadRef | DraftId, prompt: string) => void;
-  readonly promptRef: { current: string };
-  readonly composerRef: RefObject<ChatComposerHandle | null>;
   readonly setThreadError: (threadId: ThreadId, error: string | null) => void;
+  readonly runtimeMode?: RuntimeMode;
+  readonly interactionMode?: ProviderInteractionMode;
+  readonly modelSelection?: ModelSelection | null;
 }) {
   const {
     environmentId,
     activeThreadId,
     serverProjection,
     supportsQuestionAttachments,
-    composerDraftTarget,
-    setComposerDraftPrompt,
-    promptRef,
-    composerRef,
     setThreadError,
+    runtimeMode,
+    interactionMode,
+    modelSelection,
   } = input;
   const respondToThreadApproval = useOrchestrationCommand(threadEnvironment.respondToApproval, {
     reportFailure: false,
@@ -141,6 +137,9 @@ export function usePendingThreadRequests(input: {
     reportFailure: false,
   });
   const dismissThreadUserInput = useAtomCommand(threadEnvironment.dismissUserInput, {
+    reportFailure: false,
+  });
+  const startThreadTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
     reportFailure: false,
   });
   const userInputResponsesInFlight = useRef(new Set<string>());
@@ -397,38 +396,6 @@ export function usePendingThreadRequests(input: {
     if (!activePendingUserInput) {
       return;
     }
-    // The option replaces the custom answer. Anything typed there is the
-    // user's text, so it goes back to the thread draft instead of vanishing.
-    const displacedAnswer = activePendingAnswerDrafts[questionId]?.customAnswer;
-    const currentPrompt =
-      useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.prompt ?? "";
-    const nextPrompt = carryDisplacedCustomAnswerIntoPrompt(currentPrompt, displacedAnswer);
-    if (nextPrompt !== currentPrompt) {
-      setComposerDraftPrompt(composerDraftTarget, nextPrompt);
-      toastManager.add({
-        type: "info",
-        title: "Your typed text was set aside",
-        description: "It will be back in the composer once the question is answered.",
-        data: { threadRef: activeThreadId ? { environmentId, threadId: activeThreadId } : null },
-      });
-      if (activeThreadId) {
-        const store = useComposerDraftStore.getState();
-        const questionTarget = questionAttachmentDraftId(
-          environmentId,
-          activeThreadId,
-          activePendingUserInput.requestId,
-          questionId,
-        );
-        store.addThreadContexts(
-          composerDraftTarget,
-          threadContextsReferencedByAnswer(
-            displacedAnswer ?? "",
-            store.getComposerDraft(questionTarget)?.threadContexts ?? [],
-          ),
-          { appendReference: false },
-        );
-      }
-    }
     setPendingUserInputAnswersByRequestId((existing) => {
       const question =
         (activePendingProgress?.activeQuestion?.id === questionId
@@ -450,22 +417,64 @@ export function usePendingThreadRequests(input: {
         },
       };
     });
-    promptRef.current = "";
-    composerRef.current?.resetCursorState({ cursor: 0 });
   };
   const onSelectActivePendingUserInputOptionStable = useStableCallback(
     onSelectActivePendingUserInputOption,
   );
 
-  const writePrompt = useStableCallback((prompt: string) => {
-    promptRef.current = prompt;
-  });
   const onChangeActivePendingUserInputCustomAnswer = makePendingCustomAnswerSetter({
     activePendingUserInput,
     activePendingRequestKey,
-    writePrompt,
     setPendingUserInputAnswersByRequestId,
   });
+
+  const queueCustomAnswers = async (requestId: RuntimeRequestId) => {
+    if (
+      !activeThreadId ||
+      !activePendingUserInput ||
+      runtimeMode === undefined ||
+      interactionMode === undefined ||
+      modelSelection == null
+    ) {
+      if (activeThreadId) {
+        setThreadError(activeThreadId, "Could not queue that answer.");
+      }
+      return false;
+    }
+    const text = formatQueuedQuestionAnswers(
+      activePendingUserInput.questions,
+      activePendingDraftAnswers,
+    );
+    if (!text) return false;
+    const queued = await startThreadTurn({
+      environmentId,
+      input: {
+        threadId: activeThreadId,
+        message: {
+          messageId: newMessageId(),
+          role: "user",
+          text,
+          attachments: [],
+        },
+        modelSelection,
+        runtimeMode,
+        interactionMode,
+        dispatchMode: "queue",
+        queueAhead: true,
+      },
+    });
+    if (queued._tag === "Failure" && !isAtomCommandInterrupted(queued)) {
+      const error = squashAtomCommandFailure(queued);
+      setThreadError(
+        activeThreadId,
+        error instanceof Error ? error.message : "Failed to queue the answer.",
+      );
+      return false;
+    }
+    if (queued._tag === "Failure") return false;
+    const dismissed = await onDismissUserInput(requestId);
+    return dismissed?._tag === "Success";
+  };
 
   const onAdvanceActivePendingUserInput = () => {
     if (
@@ -476,6 +485,12 @@ export function usePendingThreadRequests(input: {
       return;
     }
     if (activePendingProgress.isLastQuestion) {
+      if (
+        questionSetUsesCustomAnswer(activePendingUserInput.questions, activePendingDraftAnswers)
+      ) {
+        void queueCustomAnswers(activePendingUserInput.requestId);
+        return;
+      }
       if (activePendingResolvedAnswers) {
         void onRespondToUserInput(activePendingUserInput.requestId, activePendingResolvedAnswers);
       }

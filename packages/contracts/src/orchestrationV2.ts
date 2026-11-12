@@ -3182,6 +3182,8 @@ export const OrchestrationV2Command = Schema.Union([
     manualContinuationOfRunId: Schema.optional(RunId),
     usageLimitRecoveryRequestId: Schema.optional(CommandId),
     deliveryIntent: Schema.optional(Schema.Literals(["auto", "steer", "restart"])),
+    /** When this send queues, place it ahead of user messages already waiting. */
+    queueAhead: Schema.optional(Schema.Boolean),
     delegatedCompletion: Schema.optional(
       Schema.Struct({
         parentRunId: RunId,

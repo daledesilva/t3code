@@ -314,7 +314,11 @@ import { useThreadLinkedPullRequest } from "./pullRequest/useThreadLinkedPullReq
 import { useProactivePanels } from "../hooks/useProactivePanels";
 import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEntries";
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
+import { ComposerBanner } from "./chat/ComposerBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
+import { composerSubmissionIntentForKey } from "../composer-logic";
+import { useSoftwareKeyboardOpen } from "../hooks/useSoftwareKeyboardOpen";
 import { modelFallbackBannerItem } from "./chat/ComposerUsageLimits";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
@@ -615,7 +619,6 @@ export default function ChatView(props: ChatViewProps) {
     const draft = store.getComposerDraft(composerDraftTarget);
     return draft ? composerDraftHasUserContent({ ...draft, prompt: "" }) : false;
   });
-  const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
   const composerFilesRef = useRef<ComposerFileAttachment[]>([]);
@@ -1347,14 +1350,12 @@ export default function ChatView(props: ChatViewProps) {
     activePendingDraftAnswers,
     activePendingQuestionIndex,
     activePendingProgress,
-    activePendingResolvedAnswers,
     activePendingIsResponding,
     respondingRequestIds,
     onRespondToApproval: onRespondToApprovalStable,
     onDismissUserInput: onDismissUserInputStable,
     onSelectActivePendingUserInputOption: onSelectActivePendingUserInputOptionStable,
     onChangeActivePendingUserInputCustomAnswer,
-    onAdvanceActivePendingUserInput,
     onAdvanceActivePendingUserInputStable,
     onPreviousActivePendingUserInputQuestion: onPreviousActivePendingUserInputQuestionStable,
   } = usePendingThreadRequests({
@@ -1362,11 +1363,10 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadId,
     serverProjection,
     supportsQuestionAttachments,
-    composerDraftTarget,
-    setComposerDraftPrompt,
-    promptRef,
-    composerRef,
     setThreadError,
+    runtimeMode,
+    interactionMode,
+    modelSelection: activeThread?.modelSelection ?? null,
   });
   const [heldApprovalRequestIds, setHeldApprovalRequestIds] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -2968,7 +2968,8 @@ export default function ChatView(props: ChatViewProps) {
     pendingApprovals,
     respondingRequestIds,
     activePendingProgress,
-    onAdvanceActivePendingUserInput,
+    pendingQuestion: pendingUserInputs[0] ?? null,
+    onDismissPendingQuestion: onDismissUserInputStable,
     onRespondToApproval: onRespondToApprovalStable,
     beginLocalDispatch,
     resetLocalDispatch,
@@ -3130,9 +3131,54 @@ export default function ChatView(props: ChatViewProps) {
     [childInputNow?.waitingLabel ?? null, queuedRunCount === 0 ? null : `${queuedRunCount} queued`]
       .filter((part) => part !== null)
       .join(" · ") || null;
+  const isSoftwareKeyboardOpen = useSoftwareKeyboardOpen();
+  const submitQuestionOnKeyDown = (event: KeyboardEvent) => {
+    const otherText = event.target instanceof HTMLTextAreaElement ? event.target.value : "";
+    return (
+      composerSubmissionIntentForKey({
+        event,
+        keybindings,
+        isSoftwareKeyboardOpen,
+        isDraftThread: routeKind === "draft",
+        isRunning: phase === "running",
+        sendShortcut: settings.sendShortcut,
+        prompt: otherText,
+      }) === "foreground"
+    );
+  };
+  const submitQuestionOnKeyDownStable = useStableCallback(submitQuestionOnKeyDown);
+  const questionCard =
+    pendingUserInputs.length === 0 ? null : (
+      <div className="chat-content-lane mb-3">
+        <ComposerBanner.Root detached data-thread-question-card="true" variant="info">
+          <ComposerPendingUserInputPanel
+            pendingUserInputs={pendingUserInputs}
+            cwd={gitCwd ?? undefined}
+            threadRef={routeThreadRef}
+            disabled={!canOperateThread}
+            respondingRequestIds={
+              activePendingIsResponding && activePendingUserInput
+                ? [...respondingRequestIds, activePendingUserInput.requestId]
+                : respondingRequestIds
+            }
+            answers={activePendingDraftAnswers}
+            questionIndex={activePendingQuestionIndex}
+            onToggleOption={onSelectActivePendingUserInputOptionStable}
+            onChangeCustomAnswer={(questionId, value) =>
+              onChangeActivePendingUserInputCustomAnswer(questionId, value)
+            }
+            onAdvance={onAdvanceActivePendingUserInputStable}
+            onPrevious={onPreviousActivePendingUserInputQuestionStable}
+            onDismiss={onDismissUserInputStable}
+            submitOnKeyDown={submitQuestionOnKeyDownStable}
+          />
+        </ComposerBanner.Root>
+      </div>
+    );
   // The end of the timeline holds the thread's present and next turns: what it is doing now,
   // its lifecycle status, guest messages awaiting you, then your queued messages.
   const timelineFooter =
+    questionCard === null &&
     pendingHandoff === null &&
     !hasThreadNow &&
     threadStatusLine === null &&
@@ -3157,6 +3203,7 @@ export default function ChatView(props: ChatViewProps) {
           goal={goalNow}
         />
         {threadStatusLine}
+        {questionCard}
         {pendingGuestMessageCount > 0 && isServerThread && activeThread ? (
           <GuestPendingMessages
             threadRef={scopeThreadRef(activeThread.environmentId, activeThread.id)}
@@ -3692,11 +3739,7 @@ export default function ChatView(props: ChatViewProps) {
                                 onHeldRequestIdsChange={onHeldRequestIdsChange}
                                 pendingUserInputs={pendingUserInputs}
                                 activePendingProgress={activePendingProgress}
-                                activePendingResolvedAnswers={activePendingResolvedAnswers}
                                 activePendingIsResponding={activePendingIsResponding}
-                                activePendingDraftAnswers={activePendingDraftAnswers}
-                                activePendingQuestionIndex={activePendingQuestionIndex}
-                                respondingRequestIds={respondingRequestIds}
                                 showPlanFollowUpPrompt={showPlanFollowUpPrompt}
                                 activeProposedPlan={activeProposedPlan}
                                 threadSyncPhase={
@@ -3750,18 +3793,8 @@ export default function ChatView(props: ChatViewProps) {
                                 onResume={onComposerResumeStable}
                                 onInterrupt={onInterruptStable}
                                 onImplementPlanInNewThread={onImplementPlanInNewThreadStable}
-                                onSelectActivePendingUserInputOption={
-                                  onSelectActivePendingUserInputOptionStable
-                                }
-                                onAdvanceActivePendingUserInput={
-                                  onAdvanceActivePendingUserInputStable
-                                }
-                                onDismissActivePendingUserInput={onDismissUserInputStable}
                                 onPreviousActivePendingUserInputQuestion={
                                   onPreviousActivePendingUserInputQuestionStable
-                                }
-                                onChangeActivePendingUserInputCustomAnswer={
-                                  onChangeActivePendingUserInputCustomAnswer
                                 }
                                 onProviderModelSelect={onProviderModelSelectStable}
                                 onOpenProviderSetup={openProviderSetupStable}

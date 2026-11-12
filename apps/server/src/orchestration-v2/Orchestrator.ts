@@ -174,7 +174,11 @@ import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { ProviderSwitchServiceV2 } from "./ProviderSwitchService.ts";
-import { isAutomaticCompletionRun, queuedRunsInDeliveryOrder } from "./QueuedRunOrder.ts";
+import {
+  isAutomaticCompletionRun,
+  queuedRunsInDeliveryOrder,
+  userQueuePositionsBehindFirst,
+} from "./QueuedRunOrder.ts";
 import { isRuntimePolicyAboveCeilingError, RuntimePolicyV2 } from "./RuntimePolicy.ts";
 import {
   endOrphanedNativeSubagent,
@@ -6262,7 +6266,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ? { queueHeld: true }
           : {}),
         queuePosition:
-          goalStopRunId !== undefined
+          goalStopRunId !== undefined || command.queueAhead === true
             ? 1
             : Math.max(
                 0,
@@ -6419,6 +6423,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             updatedAt: now,
           },
         });
+      }
+      if (command.queueAhead === true && goalStopRunId === undefined) {
+        for (const shift of userQueuePositionsBehindFirst(projection)) {
+          if (shift.run.queuePosition === shift.queuePosition) continue;
+          yield* emitEvent({
+            type: "run.updated",
+            threadId: command.threadId,
+            runId: shift.run.id,
+            ...(shift.run.rootNodeId === null ? {} : { nodeId: shift.run.rootNodeId }),
+            providerInstanceId: shift.run.providerInstanceId,
+            occurredAt: now,
+            payload: { ...shift.run, queuePosition: shift.queuePosition },
+          });
+        }
       }
       if (goalStopRunId !== undefined) {
         return yield* stopRunForQueuedCommand({
@@ -9723,11 +9741,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: "This question has already been answered.",
         });
       }
-      if (request.kind !== "user_input" || request.responseCapability.type !== "message") {
+      if (request.kind !== "user_input" || request.responseCapability.type === "not_resumable") {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
-          cause: "This question needs an answer. Answer it or stop the turn.",
+          cause:
+            request.kind === "user_input" && request.responseCapability.type === "not_resumable"
+              ? request.responseCapability.reason
+              : "This question needs an answer. Answer it or stop the turn.",
         });
       }
       yield* dispatchRuntimeRequestRespond(

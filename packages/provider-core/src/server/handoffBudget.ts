@@ -152,6 +152,32 @@ export function historicalMessage(
     case "proposed_plan":
       text = item.markdown;
       break;
+    case "user_input_request": {
+      const asked = item.questions
+        .map((question) => {
+          const options = question.options.map((option) => `- ${option.label}`).join("\n");
+          return [question.header, question.question, options]
+            .filter((line) => line.length > 0)
+            .join("\n");
+        })
+        .join("\n\n");
+      const answers = item.questionAnswer?.answers;
+      const answered =
+        answers === undefined
+          ? null
+          : Object.entries(answers)
+              .map(([id, answer]) => {
+                const question = item.questions.find((entry) => entry.id === id);
+                const value = Array.isArray(answer) ? answer.join(", ") : String(answer);
+                return `${question?.question ?? id}\n${value}`;
+              })
+              .join("\n\n");
+      text =
+        answered === null
+          ? `The assistant asked a question that was not answered.\n\n${asked}`
+          : `The assistant asked a question.\n\n${asked}\n\nAnswer:\n${answered}`;
+      break;
+    }
     default:
       return null;
   }

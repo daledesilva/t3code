@@ -9,6 +9,15 @@ export function isAutomaticCompletionRun(
   );
 }
 
+/** User-queued runs, in delivery order, after a new message is inserted at the front of that queue. */
+export function userQueuePositionsBehindFirst(
+  projection: Pick<OrchestrationV2ThreadProjection, "runs" | "messages">,
+): ReadonlyArray<{ readonly run: OrchestrationV2Run; readonly queuePosition: number }> {
+  return queuedRunsInDeliveryOrder(projection)
+    .filter((run) => !isAutomaticCompletionRun(projection, run))
+    .map((run, index) => ({ run, queuePosition: index + 2 }));
+}
+
 export function queuedRunsInDeliveryOrder(
   projection: Pick<OrchestrationV2ThreadProjection, "runs" | "messages">,
 ): ReadonlyArray<OrchestrationV2Run> {

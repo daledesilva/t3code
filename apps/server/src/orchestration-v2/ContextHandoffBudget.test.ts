@@ -158,6 +158,26 @@ describe("handoff budget", () => {
         streaming: false,
       }),
     );
+    const question = historicalMessage({
+      ...base,
+      type: "user_input_request",
+      requestId: "request:question" as never,
+      questions: [
+        {
+          id: "fuel",
+          header: "Fuel",
+          question: "What fuel sounds best?",
+          options: [
+            { label: "Coffee", description: "Hot" },
+            { label: "Tea", description: "Steady" },
+          ],
+        },
+      ],
+    });
+    assert.equal(question?.role, "assistant");
+    assert.include(question!.text, "was not answered");
+    assert.include(question!.text, "What fuel sounds best?");
+    assert.include(question!.text, "- Coffee");
     assert.equal(historyResponseItems([command!], "Activity")[1]?.type, "message");
   });
 

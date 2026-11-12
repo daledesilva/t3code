@@ -16,7 +16,6 @@ import {
   collapseExpandedComposerCursor,
   composerSubmissionIntentForKey,
 } from "../../composer-logic";
-import { type PendingUserInput } from "../../session-logic";
 import { type PreviewAnnotationPayload } from "@t3tools/contracts";
 import { type ReviewCommentContext } from "../../reviewCommentContext";
 import { composerTargetKey } from "../../composerDraftStore";
@@ -43,7 +42,6 @@ export function composerCommandKeyHandler(input: {
   readonly isSoftwareKeyboardOpen: boolean;
   readonly planModeUiEnabled: boolean;
   readonly isLiteralPendingAnswer: boolean;
-  readonly pendingUserInputs: ReadonlyArray<PendingUserInput>;
   readonly promptHistoryEntries: ChatComposerProps["promptHistoryEntries"];
   readonly promptHistoryPositionRef: RefObject<{
     targetKey: string;
@@ -95,7 +93,6 @@ export function composerCommandKeyHandler(input: {
     isSoftwareKeyboardOpen,
     planModeUiEnabled,
     isLiteralPendingAnswer,
-    pendingUserInputs,
     promptHistoryEntries,
     promptHistoryPositionRef,
     composerDraftTarget,
@@ -143,7 +140,6 @@ export function composerCommandKeyHandler(input: {
     if (event.shiftKey || event.altKey || event.metaKey || event.ctrlKey || event.isComposing) {
       return false;
     }
-    if (pendingUserInputs.length > 0) return false;
     if (
       composerImagesRef.current.length > 0 ||
       composerFilesRef.current.length > 0 ||

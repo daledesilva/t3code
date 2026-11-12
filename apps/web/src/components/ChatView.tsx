@@ -267,6 +267,7 @@ import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { FollowOnQueueSection } from "./chat/FollowOnQueue";
 import {
   buildFollowOnQueueLists,
+  existingThreadCanQueueBehindPredecessor,
   type FollowOnQueueServerUpdate,
   isSidebarThreadEligibleForFollowOnQueue,
   planFollowOnQueueRemove,
@@ -3156,8 +3157,7 @@ export default function ChatView(props: ChatViewProps) {
     (candidate) => candidate.environmentId === environmentId,
   );
   const activeStartAfterThreadId = activeThread?.startAfterThreadId ?? null;
-  // A thread waiting on a prior thread shows its queued message as the dashed queue row below
-  // the follow-on queue, so the timeline leaves the same message out rather than show it twice.
+  // A thread waiting on a prior thread shows its queued message once, in the timeline footer.
   const waitingQueuedMessageIds =
     serverProjection !== null && activeStartAfterThreadId !== null
       ? new Set(getUserQueuedThreadRuns(serverProjection).map((run) => run.userMessageId))
@@ -3168,16 +3168,22 @@ export default function ChatView(props: ChatViewProps) {
       priorThreadId: activeStartAfterThreadId,
       currentThreadId: isServerThread ? activeThreadId : null,
     });
+  const canQueueExistingThread =
+    isServerThread &&
+    !isProviderSubagent &&
+    canOperateThread &&
+    existingThreadCanQueueBehindPredecessor(activeRuntime?.status);
   const threadContextDragGhost = useThreadContextDragGhost();
-  const isDraggingWorkingSidebarThread =
-    isDraftHeroState &&
-    !isServerThread &&
-    (threadContextDragGhost?.threads?.some((ref) => {
-      if (ref.environmentId !== environmentId) return false;
+  const isDraggingEligibleSidebarThread =
+    threadContextDragGhost?.threads?.some((ref) => {
+      if (ref.environmentId !== environmentId || ref.threadId === activeThreadId) return false;
       const shell = environmentThreads.find((candidate) => candidate.id === ref.threadId);
       return shell !== undefined && isSidebarThreadEligibleForFollowOnQueue(shell);
-    }) ??
-      false);
+    }) ?? false;
+  const isDraggingWorkingSidebarThread =
+    isDraggingEligibleSidebarThread && (!isServerThread || canQueueExistingThread);
+  const showDockedFollowOnQueue =
+    !isDraftHeroState && (followOnBeforeQueue.length > 0 || isDraggingWorkingSidebarThread);
   const applyFollowOnServerUpdates = async (updates: ReadonlyArray<FollowOnQueueServerUpdate>) => {
     for (const update of updates) {
       if (update.kind === "clear") {
@@ -3273,9 +3279,9 @@ export default function ChatView(props: ChatViewProps) {
     refs: ReadonlyArray<ScopedThreadRef>,
     insertIndex: number,
   ) => {
-    if (isServerThread) return;
+    if (isServerThread && !canQueueExistingThread) return;
     const droppedRef = refs.find((ref) => ref.environmentId === environmentId);
-    if (!droppedRef) return;
+    if (!droppedRef || droppedRef.threadId === activeThreadId) return;
     const droppedShell = environmentThreads.find(
       (candidate) => candidate.id === droppedRef.threadId,
     );
@@ -3287,17 +3293,35 @@ export default function ChatView(props: ChatViewProps) {
       insertIndex,
     });
     void applyFollowOnServerUpdates(plan.serverUpdates);
-    setDraftThreadContext(composerDraftTarget, {
-      startAfterThreadId: plan.nextPriorThreadId,
+    if (!isServerThread) {
+      setDraftThreadContext(composerDraftTarget, {
+        startAfterThreadId: plan.nextPriorThreadId,
+      });
+      return;
+    }
+    if (
+      activeThreadId === null ||
+      plan.nextPriorThreadId === null ||
+      plan.nextPriorThreadId === activeStartAfterThreadId
+    ) {
+      return;
+    }
+    const persistPrior =
+      activeStartAfterThreadId === null ? setThreadStartAfter : reorderThreadStartAfter;
+    void persistPrior({
+      environmentId,
+      input: {
+        threadId: activeThreadId,
+        startAfterThreadId: plan.nextPriorThreadId,
+        createdAt: new Date().toISOString(),
+      },
     });
   };
   const handleDropSidebarThreadIntoQueueStable = useStableCallback(
     handleDropSidebarThreadIntoQueue,
   );
-  // Only the queue before this thread shows here; the threads that follow it are not listed,
-  // which also keeps the thread from splitting its queue in two.
-  const hasServerFollowOnQueue =
-    isServerThread && activeStartAfterThreadId !== null && followOnBeforeQueue.length > 0;
+  // Queued prompts sit under the wait-for list when that list is pinned above the composer.
+  const showQueuedTurnsInTimeline = hasQueuedTurns && !showDockedFollowOnQueue;
   // The end of the timeline holds the thread's present and next turns: what it is doing now,
   // its lifecycle status, guest messages awaiting you, then your queued messages.
   const timelineFooter =
@@ -3305,8 +3329,7 @@ export default function ChatView(props: ChatViewProps) {
     !hasThreadNow &&
     threadStatusLine === null &&
     pendingGuestMessageCount === 0 &&
-    !hasServerFollowOnQueue &&
-    !hasQueuedTurns ? null : (
+    !showQueuedTurnsInTimeline ? null : (
       <>
         {pendingHandoff === null ? null : (
           <div className="chat-content-lane">
@@ -3333,27 +3356,7 @@ export default function ChatView(props: ChatViewProps) {
             onFileOpen={openFileAttachmentStable}
           />
         ) : null}
-        {hasServerFollowOnQueue ? (
-          <div className="chat-content-lane mb-2 flex flex-col gap-2">
-            <FollowOnQueueSection
-              section="before"
-              environmentId={environmentId}
-              beforeQueue={followOnBeforeQueue}
-              afterQueue={followOnAfterQueue}
-              canOperate={canOperateThread}
-              onRemoveItem={handleRemoveFollowOnQueueItemStable}
-              onReorderQueue={handleReorderFollowOnQueueStable}
-            />
-          </div>
-        ) : null}
-        {hasQueuedTurns ? (
-          hasServerFollowOnQueue ? (
-            // The timeline hides this message while it waits, so add the gap the queue has above it.
-            <div className="mt-12">{queuedRunsControl}</div>
-          ) : (
-            queuedRunsControl
-          )
-        ) : null}
+        {showQueuedTurnsInTimeline ? queuedRunsControl : null}
       </>
     );
 
@@ -3739,6 +3742,26 @@ export default function ChatView(props: ChatViewProps) {
                   data-chat-composer-stack="true"
                   className="group/composer-stack pointer-events-auto relative z-10 mx-auto w-full max-w-(--chat-content-max-width)"
                 >
+                  {showDockedFollowOnQueue ? (
+                    <div className="mt-5 mb-6">
+                      <FollowOnQueueSection
+                        section="before"
+                        environmentId={environmentId}
+                        beforeQueue={followOnBeforeQueue}
+                        afterQueue={followOnAfterQueue}
+                        isSidebarDragging={isDraggingWorkingSidebarThread}
+                        canOperate={canOperateThread}
+                        onRemoveItem={handleRemoveFollowOnQueueItemStable}
+                        onReorderQueue={handleReorderFollowOnQueueStable}
+                        onDropSidebarThread={
+                          !isServerThread || canQueueExistingThread
+                            ? handleDropSidebarThreadIntoQueueStable
+                            : undefined
+                        }
+                      />
+                    </div>
+                  ) : null}
+                  {showDockedFollowOnQueue && hasQueuedTurns ? queuedRunsControl : null}
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full">
                       <div

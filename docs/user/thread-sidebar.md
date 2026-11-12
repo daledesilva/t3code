@@ -156,14 +156,19 @@ from the sidebar into a new thread draft.
 
 When a draft is set up to queue:
 
-- The **Queue** list appears above the new-thread heading with links to the threads ahead of the
+- **Wait for...** appears above the new-thread heading with links to the threads ahead of the
   draft and shows which thread is currently running.
 - If other threads are already queued after the thread you selected, the new thread is inserted
-  directly after it and the remaining threads in the chain appear below the composer.
+  directly after it and those threads appear under **Then run...**, below the composer.
 - Drag items within any visible queue to change their order, or drop a working thread from the
   sidebar above, between, or below items in the queue.
 - Sending your first message queues the thread on the server. When the prior thread finishes and
   goes idle, the next thread in the queue starts automatically and the queue display hides.
+
+On an existing conversation, drag a working thread from the sidebar onto **Wait for...**, which
+appears just above the message box. Messages you queue in that conversation sit below it, and
+they wait until those threads finish. This is available while the conversation is idle. Remove a
+thread from that list to send the next message immediately.
 
 ### Group threads by project (beta)
 

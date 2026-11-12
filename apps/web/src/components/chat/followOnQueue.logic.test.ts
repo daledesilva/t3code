@@ -2,6 +2,7 @@ import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts"
 import { describe, expect, it } from "vite-plus/test";
 import {
   buildFollowOnQueueLists,
+  existingThreadCanQueueBehindPredecessor,
   type FollowOnQueueThreadInput,
   planFollowOnQueueRemove,
   planFollowOnQueueReorder,
@@ -39,6 +40,20 @@ function makeQueueThread(
     id: ThreadId.make(overrides.id),
   };
 }
+
+describe("existingThreadCanQueueBehindPredecessor", () => {
+  it("accepts an idle conversation and rejects one with an active run", () => {
+    expect(existingThreadCanQueueBehindPredecessor(null)).toBe(true);
+    expect(existingThreadCanQueueBehindPredecessor(undefined)).toBe(true);
+    expect(existingThreadCanQueueBehindPredecessor("idle")).toBe(true);
+    expect(existingThreadCanQueueBehindPredecessor("queued")).toBe(true);
+    expect(existingThreadCanQueueBehindPredecessor("failed")).toBe(true);
+    expect(existingThreadCanQueueBehindPredecessor("preparing")).toBe(false);
+    expect(existingThreadCanQueueBehindPredecessor("starting")).toBe(false);
+    expect(existingThreadCanQueueBehindPredecessor("running")).toBe(false);
+    expect(existingThreadCanQueueBehindPredecessor("waiting")).toBe(false);
+  });
+});
 
 describe("buildFollowOnQueueLists", () => {
   it("splits the queue into beforeQueue (up to prior) and afterQueue (followers after prior)", () => {

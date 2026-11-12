@@ -46,6 +46,15 @@ export interface FollowOnQueuePlan {
   readonly serverUpdates: ReadonlyArray<FollowOnQueueServerUpdate>;
 }
 
+const ACTIVE_RUN_STATUSES = new Set(["preparing", "starting", "running", "waiting"]);
+
+/** An existing conversation can wait on another thread only while it has no active run. */
+export function existingThreadCanQueueBehindPredecessor(
+  runtimeStatus: string | null | undefined,
+): boolean {
+  return runtimeStatus == null || !ACTIVE_RUN_STATUSES.has(runtimeStatus);
+}
+
 export function isSidebarThreadEligibleForFollowOnQueue(thread: FollowOnQueueThreadInput): boolean {
   if (thread.deletedAt !== null || thread.archivedAt !== null) return false;
   const status = resolveSidebarThreadStatus(thread);

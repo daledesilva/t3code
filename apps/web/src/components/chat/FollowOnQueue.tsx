@@ -198,11 +198,11 @@ export function FollowOnQueueSection({
   }
 
   const subject = newThread ? "your new thread" : "this thread";
-  const title = section === "before" ? "Follow on from" : "Follow up with";
+  const title = section === "before" ? "Wait for..." : "Then run...";
   const hint =
     section === "before"
-      ? `${capitalize(subject)} will start after these threads complete.`
-      : `These threads will start after ${subject} completes.`;
+      ? `${capitalize(subject)} waits until these threads finish.`
+      : `These threads run after ${subject} finishes.`;
   const removeItem = canOperate ? onRemoveItem : undefined;
   const itemIds = items.map((item) => item.id);
   const canReorder =

@@ -19,6 +19,8 @@ import { useAtomValue } from "@effect/atom-react";
 import { useRef, useState } from "react";
 
 import {
+  MessageId,
+  type ChatAttachment,
   type EnvironmentId,
   type ProviderApprovalDecision,
   type RuntimeRequestId,
@@ -33,12 +35,16 @@ import {
   seedUserInputDraftAnswers,
   userInputDraftKey,
 } from "@t3tools/client-runtime/state/thread-requests";
+import { uuidv4 } from "../lib/uuid";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 
 import { environmentThreadDetails, threadEnvironment } from "./threads";
 import {
   buildPendingUserInputAnswers,
+  formatQueuedQuestionAnswers,
+  questionSetUsesCustomAnswer,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
@@ -176,6 +182,7 @@ export function useSelectedThreadRequests() {
     threadEnvironment.dismissUserInput,
     "thread user input dismissal",
   );
+  const startTurn = useAtomCommand(threadEnvironment.startTurn, "thread turn start");
   const { selectedThread: selectedThreadShell } = useThreadSelection();
   const pendingRequests = useSelectedThreadPendingRequests();
   const userInputDraftsByRequestKey = useAtomValue(userInputDraftsByRequestKeyAtom);
@@ -325,11 +332,71 @@ export function useSelectedThreadRequests() {
       !selectedThreadShell ||
       !activePendingUserInput ||
       activePendingUserInput.responseCapability === "not_resumable" ||
-      !activePendingUserInputAnswers ||
       !readEnvironmentScope(selectedThreadShell.environmentId, AuthOrchestrationOperateScope)
     ) {
       return;
     }
+    if (
+      questionSetUsesCustomAnswer(activePendingUserInput.questions, activePendingUserInputDrafts)
+    ) {
+      const text = formatQueuedQuestionAnswers(
+        activePendingUserInput.questions,
+        activePendingUserInputDrafts,
+      );
+      if (!text) return;
+      const attachments = activePendingUserInput.questions.flatMap((question) => {
+        const key = questionAttachmentDraftKey(
+          selectedThreadShell.environmentId,
+          selectedThreadShell.id,
+          activePendingUserInput.requestId,
+          question.id,
+        );
+        return (attachmentDrafts[key]?.attachments ?? []).flatMap((attachment) =>
+          attachment.uploadedAttachmentId
+            ? [
+                {
+                  type: attachment.type,
+                  id: attachment.uploadedAttachmentId,
+                  name: attachment.name,
+                  mimeType: attachment.mimeType,
+                  sizeBytes: attachment.sizeBytes,
+                } satisfies ChatAttachment,
+              ]
+            : [],
+        );
+      });
+      setRespondingUserInputId(activePendingUserInput.requestId);
+      const queued = await startTurn({
+        environmentId: selectedThreadShell.environmentId,
+        input: {
+          threadId: selectedThreadShell.id,
+          message: {
+            messageId: MessageId.make(uuidv4()),
+            role: "user",
+            text,
+            attachments,
+          },
+          modelSelection: selectedThreadShell.modelSelection,
+          runtimeMode: selectedThreadShell.runtimeMode,
+          interactionMode: selectedThreadShell.interactionMode,
+          dispatchMode: "queue",
+          queueAhead: true,
+        },
+      });
+      if (queued._tag === "Failure") {
+        setRespondingUserInputId((current) =>
+          current === activePendingUserInput.requestId ? null : current,
+        );
+        const error = squashAtomCommandFailure(queued);
+        Dialog.alert(
+          "Could not queue the answer",
+          error instanceof Error ? error.message : "Try again.",
+        );
+        return;
+      }
+      return onDismissUserInput();
+    }
+    if (!activePendingUserInputAnswers) return;
 
     const responseKey = questionAttachmentDraftKey(
       selectedThreadShell.environmentId,

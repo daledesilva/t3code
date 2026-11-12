@@ -7,7 +7,7 @@ import {
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import { makeThreadRequestsResolvedAnnouncer } from "@t3tools/client-runtime/state/thread-requests";
-import { useLayoutEffect, useRef, type ComponentProps } from "react";
+import { useLayoutEffect, type ComponentProps } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
@@ -17,9 +17,7 @@ vi.mock(import("../ChatMarkdown"), async (importOriginal) => ({
 }));
 
 import { act, fakeTimers, render } from "../../../test/render";
-import { useComposerDraftStore } from "../../composerDraftStore";
 import { makeThreadProjectionFixture } from "../../test-fixtures";
-import { toastManager } from "../ui/toast";
 import { usePendingThreadRequests } from "./usePendingThreadRequests";
 
 const threadRef = { environmentId: EnvironmentId.make("env"), threadId: ThreadId.make("thread") };
@@ -83,18 +81,11 @@ interface ProbeProps {
 }
 
 function useProbeRequests({ environmentId, projection, loading = false }: ProbeProps) {
-  const promptRef = useRef("");
-  const composerRef = useRef(null);
   return usePendingThreadRequests({
     environmentId,
     activeThreadId: projection.thread.id,
     serverProjection: loading ? null : projection,
     supportsQuestionAttachments: false,
-    composerDraftTarget: { environmentId, threadId: projection.thread.id },
-    setComposerDraftPrompt: (target, prompt) =>
-      useComposerDraftStore.getState().setPrompt(target, prompt),
-    promptRef,
-    composerRef,
     setThreadError: () => {},
   });
 }
@@ -144,12 +135,9 @@ it("retains answers, selections and question position after leaving chat, includ
   expect(requests).toMatchObject(expected);
 });
 
-it("tells the user when an option click moves their typed answer into the hidden composer draft", async () => {
+it("keeps typed Other text when an offered option is selected", async () => {
   using _timers = fakeTimers();
   const environmentId = EnvironmentId.make("displaced-environment");
-  const draftTarget = { environmentId, threadId: threadRef.threadId };
-  const draftPrompt = () => useComposerDraftStore.getState().getComposerDraft(draftTarget)?.prompt;
-  using toast = vi.spyOn(toastManager, "add");
   await using _screen = await render(
     <PendingRequestsProbe
       environmentId={environmentId}
@@ -158,27 +146,19 @@ it("tells the user when an option click moves their typed answer into the hidden
   );
 
   await act(() => requests.onSelectActivePendingUserInputOption("question-0", "Incremental"));
-  expect(toast).not.toHaveBeenCalled();
-
   await act(() => requests.onChangeActivePendingUserInputCustomAnswer("question-0", "first try"));
   await act(() => requests.onSelectActivePendingUserInputOption("question-0", "Incremental"));
-  expect(draftPrompt()).toBe("first try");
-  expect(toast).toHaveBeenCalledTimes(1);
-  expect(toast).toHaveBeenCalledWith(
-    expect.objectContaining({
-      type: "info",
-      title: "Your typed text was set aside",
-      description: "It will be back in the composer once the question is answered.",
-      data: { threadRef: draftTarget },
-    }),
-  );
+  expect(requests.activePendingDraftAnswers["question-0"]).toMatchObject({
+    customAnswer: "",
+    retainedCustomAnswer: "first try",
+    selectedOptionValues: ["Incremental"],
+  });
 
   await act(() => requests.onChangeActivePendingUserInputCustomAnswer("question-0", "second try"));
-  expect(draftPrompt()).toBe("first try");
   expect(requests.activePendingDraftAnswers["question-0"]).toMatchObject({
     customAnswer: "second try",
+    retainedCustomAnswer: "second try",
   });
-  expect(toast).toHaveBeenCalledTimes(1);
 });
 
 function QuestionPositionProbe(props: ProbeProps) {

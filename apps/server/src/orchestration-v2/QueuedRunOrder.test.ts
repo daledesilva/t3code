@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { queuedRunsInDeliveryOrder } from "./QueuedRunOrder.ts";
+import { queuedRunsInDeliveryOrder, userQueuePositionsBehindFirst } from "./QueuedRunOrder.ts";
 
 describe("queued run delivery order", () => {
   it("keeps automatic completion delivery ahead of visible queued messages", () => {
@@ -46,6 +46,16 @@ describe("queued run delivery order", () => {
       "run:automatic",
       "run:visible-first",
       "run:visible-second",
+    ]);
+    expect(userQueuePositionsBehindFirst(projection)).toEqual([
+      expect.objectContaining({
+        queuePosition: 2,
+        run: expect.objectContaining({ id: "run:visible-first" }),
+      }),
+      expect.objectContaining({
+        queuePosition: 3,
+        run: expect.objectContaining({ id: "run:visible-second" }),
+      }),
     ]);
   });
 });

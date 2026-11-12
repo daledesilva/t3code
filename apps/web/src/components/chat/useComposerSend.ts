@@ -27,6 +27,7 @@ import {
   ProviderInteractionMode,
   RuntimeMode,
 } from "@t3tools/contracts";
+import { unansweredQuestionTakeoverText } from "@t3tools/client-runtime/state/pending-user-input";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
 import { wasBootstrapThreadDeleted } from "@t3tools/client-runtime/errors";
 import {
@@ -137,7 +138,7 @@ import type { SessionPhase } from "../../types";
 import type { DraftSessionState } from "../../composerDraftStore";
 import type { ComposerHandleRef } from "../../composerHandleContext";
 import type { useLogicalProjectEnvironments } from "../../hooks/useLogicalProjectEnvironments";
-import type { LatestProposedPlanState } from "../../session-logic";
+import type { LatestProposedPlanState, PendingUserInput } from "../../session-logic";
 import type { useDraftEnvironmentRouting } from "./useDraftEnvironmentRouting";
 import type { useLocalDispatchState } from "./useLocalDispatchState";
 import type { usePendingThreadRequests } from "./usePendingThreadRequests";
@@ -222,7 +223,10 @@ interface ComposerSendInput {
   readonly pendingApprovals: PendingThreadRequests["pendingApprovals"];
   readonly respondingRequestIds: PendingThreadRequests["respondingRequestIds"];
   readonly activePendingProgress: PendingThreadRequests["activePendingProgress"];
-  readonly onAdvanceActivePendingUserInput: PendingThreadRequests["onAdvanceActivePendingUserInput"];
+  readonly pendingQuestion: PendingUserInput | null;
+  readonly onDismissPendingQuestion: (
+    requestId: PendingUserInput["requestId"],
+  ) => Promise<unknown> | unknown;
   readonly onRespondToApproval: PendingThreadRequests["onRespondToApproval"];
   readonly beginLocalDispatch: LocalDispatchState["beginLocalDispatch"];
   readonly resetLocalDispatch: LocalDispatchState["resetLocalDispatch"];
@@ -318,7 +322,8 @@ export function useComposerSend(input: ComposerSendInput) {
     pendingApprovals,
     respondingRequestIds,
     activePendingProgress,
-    onAdvanceActivePendingUserInput,
+    pendingQuestion,
+    onDismissPendingQuestion,
     onRespondToApproval: onRespondToApprovalStable,
     beginLocalDispatch,
     resetLocalDispatch,
@@ -535,14 +540,6 @@ export function useComposerSend(input: ComposerSendInput) {
         setComposerDraftPrompt(composerDraftTarget, "");
         composerRef.current?.resetCursorState();
       }
-      return;
-    }
-    if (answeringQuestion) {
-      if (directAnnotation) {
-        notifyDirectAnnotationAttached();
-        return;
-      }
-      onAdvanceActivePendingUserInput();
       return;
     }
     if (!sendCtx?.providerAvailable) {
@@ -922,12 +919,19 @@ export function useComposerSend(input: ComposerSendInput) {
     );
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
+    const takesOverQuestion =
+      pendingQuestion !== null && (turnDispatchMode === "steer" || turnDispatchMode === "restart");
+    const takeoverText = takesOverQuestion
+      ? unansweredQuestionTakeoverText(pendingQuestion.questions)
+      : null;
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,
       effort: ctxSelectedPromptEffort,
-      text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+      text: [takeoverText, messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT]
+        .filter((part) => part !== null && part.length > 0)
+        .join("\n\n"),
     });
     if (composerRef.current?.validateProviderInput(outgoingMessageText) === false) {
       return;
@@ -1360,6 +1364,9 @@ export function useComposerSend(input: ComposerSendInput) {
           ? scopeThreadRef(environmentId, threadIdForSend)
           : null;
       if (backgroundThreadRef) beginBackgroundDraftSubmissionByRef(backgroundThreadRef);
+      if (takesOverQuestion && pendingQuestion) {
+        await onDismissPendingQuestion(pendingQuestion.requestId);
+      }
       const startPromise = startThreadTurn({
         environmentId,
         input: {

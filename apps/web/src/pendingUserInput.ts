@@ -2,9 +2,10 @@ import type { ThreadContextRecord, UserInputQuestion } from "@t3tools/contracts"
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import {
-  buildPendingUserInputAnswers,
   normalizeSelectedOptionValues,
+  questionHasSubmittableAnswer,
   resolvePendingUserInputAnswer,
+  visibleOtherAnswer,
   type PendingUserInputAnswer,
   type PendingUserInputDraftAnswer,
 } from "@t3tools/client-runtime/state/pending-user-input";
@@ -67,9 +68,7 @@ function countAnsweredPendingUserInputQuestions(
   draftAnswers: Record<string, PendingUserInputDraftAnswer>,
 ): number {
   return questions.reduce((count, question) => {
-    return resolvePendingUserInputAnswer(question, draftAnswers[question.id]) !== null
-      ? count + 1
-      : count;
+    return questionHasSubmittableAnswer(question, draftAnswers[question.id]) ? count + 1 : count;
   }, 0);
 }
 
@@ -85,8 +84,15 @@ export function derivePendingUserInputProgress(
   const resolvedAnswer = activeQuestion
     ? resolvePendingUserInputAnswer(activeQuestion, activeDraft)
     : null;
-  const customAnswer =
-    activeQuestion?.allowCustomAnswer === false ? "" : (activeDraft?.customAnswer ?? "");
+  const customAnswer = visibleOtherAnswer(activeDraft);
+  const selectedOptionValues = activeQuestion
+    ? normalizeSelectedOptionValues(activeQuestion, activeDraft?.selectedOptionValues)
+    : [];
+  const usingCustomAnswer =
+    activeQuestion?.initialAnswer !== undefined
+      ? (activeDraft?.customAnswer ?? "").length > 0
+      : (activeDraft?.customAnswer ?? "").trim().length > 0 &&
+        (activeQuestion?.allowCustomAnswer !== false || selectedOptionValues.length === 0);
   const answeredQuestionCount = countAnsweredPendingUserInputQuestions(questions, draftAnswers);
   const isLastQuestion =
     questions.length === 0 ? true : normalizedQuestionIndex >= questions.length - 1;
@@ -95,16 +101,15 @@ export function derivePendingUserInputProgress(
     questionIndex: normalizedQuestionIndex,
     activeQuestion,
     activeDraft,
-    selectedOptionValues: activeQuestion
-      ? normalizeSelectedOptionValues(activeQuestion, activeDraft?.selectedOptionValues)
-      : [],
+    selectedOptionValues,
     customAnswer,
     resolvedAnswer,
-    usingCustomAnswer:
-      (activeQuestion?.initialAnswer !== undefined ? customAnswer : customAnswer.trim()).length > 0,
+    usingCustomAnswer,
     answeredQuestionCount,
     isLastQuestion,
-    isComplete: buildPendingUserInputAnswers(questions, draftAnswers) !== null,
-    canAdvance: resolvedAnswer !== null,
+    isComplete: questions.every((question) =>
+      questionHasSubmittableAnswer(question, draftAnswers[question.id]),
+    ),
+    canAdvance: activeQuestion ? questionHasSubmittableAnswer(activeQuestion, activeDraft) : false,
   };
 }

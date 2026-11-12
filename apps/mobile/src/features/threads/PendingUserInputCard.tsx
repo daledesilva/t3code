@@ -26,6 +26,7 @@ import { useMarkdownPreviewStyles } from "../files/FileMarkdownPreview";
 import { useLiveThreadLinkLabels } from "../../state/entities";
 import {
   isPendingUserInputOptionSelected,
+  questionHasSubmittableAnswer,
   type PendingUserInputDraftAnswer,
 } from "@t3tools/client-runtime/state/pending-user-input";
 import type { PendingUserInput } from "../../lib/threadActivity";
@@ -288,20 +289,22 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                   );
                 })}
               </View>
-              {question.allowCustomAnswer !== false ? (
-                <QuestionAttachments
-                  key={`${props.pendingUserInput.requestId}:${question.id}`}
-                  requestId={props.pendingUserInput.requestId}
-                  question={question}
-                  questions={props.pendingUserInput.questions}
-                  disabled={responseDisabled}
-                  value={draft?.customAnswer ?? ""}
-                  onChangeText={(value) =>
-                    props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
-                  }
-                  onInputFocusChange={props.onInputFocusChange}
-                />
-              ) : null}
+              <QuestionAttachments
+                key={`${props.pendingUserInput.requestId}:${question.id}`}
+                requestId={props.pendingUserInput.requestId}
+                question={question}
+                questions={props.pendingUserInput.questions}
+                disabled={responseDisabled}
+                value={
+                  draft?.retainedCustomAnswer && !draft.customAnswer
+                    ? draft.retainedCustomAnswer
+                    : (draft?.customAnswer ?? "")
+                }
+                onChangeText={(value) =>
+                  props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
+                }
+                onInputFocusChange={props.onInputFocusChange}
+              />
             </View>
           );
         })}
@@ -309,8 +312,20 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
       <Button
         label="Submit answers"
         fullWidth
-        tone={props.answers ? "primary" : "secondary"}
-        disabled={!props.canOperateThread || responseDisabled || props.answers === null}
+        tone={
+          props.pendingUserInput.questions.every((question) =>
+            questionHasSubmittableAnswer(question, props.drafts[question.id]),
+          )
+            ? "primary"
+            : "secondary"
+        }
+        disabled={
+          !props.canOperateThread ||
+          responseDisabled ||
+          !props.pendingUserInput.questions.every((question) =>
+            questionHasSubmittableAnswer(question, props.drafts[question.id]),
+          )
+        }
         onPress={() => void props.onSubmit()}
       />
       {props.pendingUserInput.dismissible ? (

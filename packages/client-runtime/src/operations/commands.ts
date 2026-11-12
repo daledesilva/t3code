@@ -183,6 +183,8 @@ export interface StartThreadTurnInput extends ThreadCommandInput {
   readonly bootstrap?: StartThreadBootstrap;
   readonly sourceProposedPlan?: { readonly threadId: ThreadId; readonly planId: PlanId };
   readonly dispatchMode?: "auto" | "queue" | "steer" | "restart" | "start";
+  /** With `dispatchMode: "queue"`, place this message ahead of user messages already waiting. */
+  readonly queueAhead?: boolean;
   /** Start a new provider session; needs the server's `freshContext` capability. */
   readonly freshContext?: boolean;
 }
@@ -781,6 +783,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
     ...(input.sourceProposedPlan === undefined ? {} : { sourcePlanRef: input.sourceProposedPlan }),
     ...(input.freshContext ? { freshContext: true } : {}),
     ...(requestedMode !== "queue" ? { deliveryIntent: requestedMode } : {}),
+    ...(input.queueAhead === true ? { queueAhead: true } : {}),
     dispatchMode,
   });
 });

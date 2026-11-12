@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  activeCustomQuestionAnswer,
   buildPendingUserInputAnswers,
+  formatQueuedQuestionAnswers,
+  unansweredQuestionTakeoverText,
   isPendingUserInputOptionSelected,
+  questionSetUsesCustomAnswer,
   resolvePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
@@ -144,8 +148,11 @@ describe("togglePendingUserInputOptionSelection", () => {
 });
 
 describe("setPendingUserInputCustomAnswer", () => {
-  it("rejects arbitrary text when the provider only accepts offered options", () => {
-    expect(setPendingUserInputCustomAnswer(nativeChoiceQuestion, undefined, "Other")).toEqual({});
+  it("keeps Other text without treating it as a native choice-only answer", () => {
+    expect(setPendingUserInputCustomAnswer(nativeChoiceQuestion, undefined, "Other")).toEqual({
+      customAnswer: "Other",
+      retainedCustomAnswer: "Other",
+    });
     expect(
       buildPendingUserInputAnswers([nativeChoiceQuestion], { result: { customAnswer: "Other" } }),
     ).toBeNull();
@@ -164,6 +171,49 @@ const compatQuestion = {
   options: [{ label: "Keep current envelope", description: "Preserve current wire format" }],
   multiSelect: false,
 } as const;
+
+describe("unansweredQuestionTakeoverText", () => {
+  it("carries the question and its options when a message takes over the turn", () => {
+    expect(
+      unansweredQuestionTakeoverText([
+        {
+          header: "Fuel",
+          question: "What fuel sounds best?",
+          options: [
+            { label: "Coffee", description: "Hot and simple" },
+            { label: "Tea", description: "Tea" },
+          ],
+        },
+      ]),
+    ).toBe(
+      [
+        "The assistant asked a question that was not answered. This message takes over that turn.",
+        "",
+        "Fuel",
+        "What fuel sounds best?",
+        "- Coffee: Hot and simple",
+        "- Tea",
+      ].join("\n"),
+    );
+    expect(unansweredQuestionTakeoverText([])).toBeNull();
+  });
+});
+
+describe("formatQueuedQuestionAnswers", () => {
+  it("puts a custom answer ahead of the native choice and keeps an offered option's label", () => {
+    const drafts = {
+      result: { customAnswer: "Use the archive" },
+      scope: { selectedOptionValues: ["Node.js"] },
+    };
+    expect(questionSetUsesCustomAnswer([nativeChoiceQuestion, singleSelectQuestion], drafts)).toBe(
+      true,
+    );
+    expect(activeCustomQuestionAnswer(nativeChoiceQuestion, drafts.result)).toBe("Use the archive");
+    expect(formatQueuedQuestionAnswers([nativeChoiceQuestion, singleSelectQuestion], drafts)).toBe(
+      "Which result should be used?\nUse the archive\n\nWhat should the plan target first?\nNode.js",
+    );
+  });
+});
 
 describe("buildPendingUserInputAnswers", () => {
   it("returns a canonical answer map for complete prompts", () => {

@@ -726,11 +726,18 @@ function QueuedMessage(props: {
                     {props.onEdit ? (
                       <Tooltip>
                         <TooltipTrigger
+                          nativeButton={false}
                           render={
-                            <span className="ms-1 inline-block align-baseline text-muted-foreground/80" />
+                            <span className="ms-1 inline-block translate-y-px align-baseline leading-none text-muted-foreground" />
                           }
                         >
-                          <PencilIcon aria-hidden className="inline size-3.5 align-baseline" />
+                          <PencilIcon
+                            aria-hidden
+                            className="block size-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={1.75}
+                          />
                         </TooltipTrigger>
                         <TooltipPopup>{props.editLabel}</TooltipPopup>
                       </Tooltip>

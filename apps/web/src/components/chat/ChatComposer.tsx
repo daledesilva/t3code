@@ -3331,7 +3331,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       <PauseIcon />
                     </ComposerBanner.Icon>
                     <ComposerBanner.Content>
-                      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                      <span
+                        className={cn(
+                          "min-w-0 flex-1 truncate",
+                          isPausedOnEditingQueuedMessage
+                            ? "text-success-foreground"
+                            : "text-muted-foreground",
+                        )}
+                      >
                         {isPausedOnEditingQueuedMessage
                           ? "The thread is paused until you save, cancel, or reorder this prompt."
                           : "The AI will pause once it reaches this prompt until you click Cancel or Save."}

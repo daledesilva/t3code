@@ -124,7 +124,8 @@ export function QueuedRunsControl({
   const reorder = useAtomCommand(threadEnvironment.reorderQueuedRun);
   const merge = useAtomCommand(threadEnvironment.mergeQueuedRuns);
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    // A tap edits. A hold starts the reorder, with room for a finger to settle.
+    useSensor(PointerSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const [showAll, setShowAll] = useState(false);
@@ -356,8 +357,26 @@ export function QueuedRunsControl({
                     </TooltipPopup>
                   </Tooltip>
                 ) : null;
-              const sideControls = !isEditing ? (
-                <>
+              const canEdit =
+                !isEditing &&
+                item.runId !== null &&
+                item.messageId !== null &&
+                item.editable &&
+                busyRunId === null &&
+                props.editBlockedReason === null;
+              const editQueuedMessage = canEdit
+                ? () => {
+                    if (item.runId === null || item.messageId === null) return;
+                    props.onEditQueuedRun({
+                      runId: item.runId,
+                      messageId: item.messageId,
+                      text: item.text,
+                      attachments: item.attachments,
+                    });
+                  }
+                : null;
+              const removeControl =
+                item.runId === null ? null : (
                   <Tooltip>
                     <TooltipTrigger
                       render={
@@ -365,7 +384,7 @@ export function QueuedRunsControl({
                           size="icon-xs"
                           variant="ghost-muted"
                           aria-label="Remove queued message"
-                          disabled={item.runId === null || busyRunId !== null}
+                          disabled={busyRunId !== null}
                           onClick={() => {
                             if (item.runId !== null) void remove(item.runId);
                           }}
@@ -376,40 +395,7 @@ export function QueuedRunsControl({
                     </TooltipTrigger>
                     <TooltipPopup>Remove from queue</TooltipPopup>
                   </Tooltip>
-                  <Tooltip>
-                    {/* The span keeps the tooltip, and its reason, on a disabled button. */}
-                    <TooltipTrigger render={<span className="flex shrink-0" />}>
-                      <Button
-                        size="icon-xs"
-                        variant="ghost-muted"
-                        aria-label="Edit queued message"
-                        disabled={
-                          item.runId === null ||
-                          !item.editable ||
-                          busyRunId !== null ||
-                          props.editBlockedReason !== null
-                        }
-                        onClick={() => {
-                          if (item.runId !== null && item.messageId !== null) {
-                            props.onEditQueuedRun({
-                              runId: item.runId,
-                              messageId: item.messageId,
-                              text: item.text,
-                              attachments: item.attachments,
-                            });
-                          }
-                        }}
-                      >
-                        <PencilIcon />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipPopup>
-                      {props.editBlockedReason ??
-                        `Edit in the composer${item.serverIndex === queued.length - 1 && props.editShortcutLabel ? ` (${props.editShortcutLabel})` : ""}`}
-                    </TooltipPopup>
-                  </Tooltip>
-                </>
-              ) : null;
+                );
               const mergeControl = canMergeWithNext ? (
                 <Tooltip>
                   <TooltipTrigger render={<span className="flex shrink-0" />}>
@@ -444,7 +430,7 @@ export function QueuedRunsControl({
                   canReorder={canReorder}
                   disabled={item.runId === null || busyRunId !== null}
                 >
-                  {({ dragHandle }) => (
+                  {({ reorder }) => (
                     <QueuedMessage
                       environmentId={props.environmentId}
                       message={item.message}
@@ -453,14 +439,15 @@ export function QueuedRunsControl({
                       isEditing={isEditing}
                       timestampFormat={props.timestampFormat}
                       onOpenThread={props.onOpenThread}
-                      leadingControl={sendNowControl}
-                      trailingControls={sideControls}
-                      footerLeading={
-                        <>
-                          {dragHandle}
-                          {mergeControl}
-                        </>
+                      onEdit={editQueuedMessage}
+                      editLabel={
+                        props.editBlockedReason ??
+                        `Edit in the composer${item.serverIndex === queued.length - 1 && props.editShortcutLabel ? ` (${props.editShortcutLabel})` : ""}`
                       }
+                      leadingControl={sendNowControl}
+                      reorder={reorder}
+                      footerLeading={mergeControl}
+                      removeControl={removeControl}
                     >
                       {item.pending ? (
                         <span className="flex items-center gap-1 px-1">
@@ -514,6 +501,9 @@ export function QueuedRunsControl({
   );
 }
 
+// Bubble padding plus the first text line, so the controls center on that line.
+const FIRST_LINE_ALIGN = "box-content flex h-5 items-center pt-2";
+
 function MergeQueuedMessagesIcon() {
   return (
     <svg
@@ -541,32 +531,18 @@ function SortableQueuedMessageItem(props: {
   readonly isEditing: boolean;
   readonly canReorder: boolean;
   readonly disabled: boolean;
-  readonly children: (input: { readonly dragHandle: ReactNode }) => ReactNode;
+  readonly children: (input: {
+    readonly reorder: {
+      readonly attributes: ReturnType<typeof useSortable>["attributes"];
+      readonly listeners: ReturnType<typeof useSortable>["listeners"];
+    } | null;
+  }) => ReactNode;
 }) {
   const sortableDisabled = !props.canReorder || props.disabled;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: props.id,
     disabled: sortableDisabled,
   });
-  const dragHandle = props.canReorder ? (
-    <Tooltip>
-      <TooltipTrigger
-        render={<span className="flex shrink-0 cursor-grab active:cursor-grabbing" />}
-      >
-        <Button
-          size="icon-xs"
-          variant="ghost-muted"
-          aria-label="Reorder queued message"
-          disabled={sortableDisabled}
-          {...attributes}
-          {...listeners}
-        >
-          <GripVerticalIcon />
-        </Button>
-      </TooltipTrigger>
-      <TooltipPopup>Drag to reorder</TooltipPopup>
-    </Tooltip>
-  ) : null;
 
   return (
     <li
@@ -581,7 +557,9 @@ function SortableQueuedMessageItem(props: {
         isDragging && "relative z-10 opacity-90",
       )}
     >
-      {props.children({ dragHandle })}
+      {props.children({
+        reorder: sortableDisabled ? null : { attributes, listeners },
+      })}
     </li>
   );
 }
@@ -597,9 +575,15 @@ function QueuedMessage(props: {
   readonly isEditing: boolean;
   readonly timestampFormat: TimestampFormat;
   readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly onEdit: (() => void) | null;
+  readonly editLabel: string;
   readonly leadingControl?: ReactNode;
-  readonly trailingControls?: ReactNode;
+  readonly reorder: {
+    readonly attributes: ReturnType<typeof useSortable>["attributes"];
+    readonly listeners: ReturnType<typeof useSortable>["listeners"];
+  } | null;
   readonly footerLeading?: ReactNode;
+  readonly removeControl?: ReactNode;
   readonly children: ReactNode;
 }) {
   const presentation = props.message ? resolveUserMessagePresentation(props.message) : null;
@@ -629,6 +613,8 @@ function QueuedMessage(props: {
         : null;
   const bodyVisible = fold === null || expanded;
   const promptLink = promptLinkFor(props.previewText);
+  const bubbleIsButton = props.onEdit !== null && fold === null;
+  const { onKeyDown: reorderKeyDown, ...bubbleReorderListeners } = props.reorder?.listeners ?? {};
 
   return (
     <>
@@ -645,12 +631,30 @@ function QueuedMessage(props: {
         )}
       >
         {props.leadingControl ? (
-          <div className="flex shrink-0 items-center pt-0.5">{props.leadingControl}</div>
+          <div className={FIRST_LINE_ALIGN}>{props.leadingControl}</div>
         ) : null}
         {/* Dashed and unfilled: a turn that has not been sent yet. */}
         <div
+          role={bubbleIsButton ? "button" : undefined}
+          tabIndex={bubbleIsButton ? 0 : undefined}
+          aria-label={bubbleIsButton ? "Edit queued message" : undefined}
+          {...bubbleReorderListeners}
+          onClick={(event) => {
+            if (!props.onEdit) return;
+            const target = event.target;
+            if (target instanceof Element && target.closest("button, a")) return;
+            props.onEdit();
+          }}
+          onKeyDown={(event) => {
+            reorderKeyDown?.(event);
+            if (!bubbleIsButton || event.target !== event.currentTarget) return;
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            props.onEdit?.();
+          }}
           className={cn(
-            "flex min-w-0 max-w-[80%] flex-col rounded-2xl border border-dashed text-sm",
+            "flex min-w-0 max-w-[80%] flex-col rounded-2xl border border-dashed text-start text-sm",
+            props.onEdit && "cursor-pointer",
             props.isEditing
               ? "border-primary/60 text-foreground"
               : attribution === "guest"
@@ -697,15 +701,44 @@ function QueuedMessage(props: {
                 </span>
               ) : null}
               {/* In full, like a sent turn: a queued message is read before it is sent. */}
-              {props.previewText ? (
-                <p className="whitespace-pre-wrap wrap-anywhere">{props.previewText}</p>
+              {props.previewText || props.onEdit ? (
+                <p className="whitespace-pre-wrap wrap-anywhere">
+                  {props.previewText}
+                  {props.onEdit ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <span className="ms-1 inline-block translate-y-px text-muted-foreground/80" />
+                        }
+                      >
+                        <PencilIcon aria-hidden className="size-3.5" />
+                      </TooltipTrigger>
+                      <TooltipPopup>{props.editLabel}</TooltipPopup>
+                    </Tooltip>
+                  ) : null}
+                </p>
               ) : null}
             </div>
           ) : null}
         </div>
-        {props.trailingControls ? (
-          <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
-            {props.trailingControls}
+        {props.reorder ? (
+          <div className={FIRST_LINE_ALIGN}>
+            <Tooltip>
+              <TooltipTrigger
+                render={<span className="flex shrink-0 cursor-grab active:cursor-grabbing" />}
+              >
+                <Button
+                  size="icon-xs"
+                  variant="ghost-muted"
+                  aria-label="Reorder queued message"
+                  {...props.reorder.attributes}
+                  {...props.reorder.listeners}
+                >
+                  <GripVerticalIcon />
+                </Button>
+              </TooltipTrigger>
+              <TooltipPopup>Hold and drag to reorder</TooltipPopup>
+            </Tooltip>
           </div>
         ) : null}
       </div>
@@ -749,6 +782,7 @@ function QueuedMessage(props: {
                 variant="ghost"
               />
             ) : null}
+            {props.removeControl}
           </span>
         ) : null}
         {props.children}

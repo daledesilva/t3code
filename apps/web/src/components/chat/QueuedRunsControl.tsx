@@ -123,8 +123,8 @@ export function QueuedRunsControl({
   const reorder = useAtomCommand(threadEnvironment.reorderQueuedRun);
   const merge = useAtomCommand(threadEnvironment.mergeQueuedRuns);
   const sensors = useSensors(
-    // A tap edits. A hold starts the reorder, with room for a finger to settle.
-    useSensor(PointerSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+    // A click stays a click. Moving the pointer starts the reorder.
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const [showAll, setShowAll] = useState(false);
@@ -669,7 +669,7 @@ function QueuedMessage(props: {
               props.onEdit?.();
             }}
             className={cn(
-              "flex min-w-0 max-w-[80%] flex-col rounded-2xl border border-dashed text-start text-sm",
+              "flex min-w-0 max-w-[80%] touch-none flex-col rounded-2xl border border-dashed text-start text-sm",
               props.onEdit && "cursor-pointer",
               props.isEditing
                 ? "border-primary/60 text-foreground"
@@ -755,22 +755,22 @@ function QueuedMessage(props: {
                 <button
                   type="button"
                   aria-label="Reorder queued message"
-                  className="flex size-6 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground active:cursor-grabbing"
+                  className="flex size-6 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground active:cursor-grabbing"
                   {...props.reorder.attributes}
                   {...props.reorder.listeners}
                 >
                   <QueueDragGrip />
                 </button>
               </TooltipTrigger>
-              <TooltipPopup>Hold and drag to reorder</TooltipPopup>
+              <TooltipPopup>Drag to reorder</TooltipPopup>
             </Tooltip>
           ) : null}
         </div>
         <div className="flex w-full items-center justify-end gap-1.5 text-xs text-muted-foreground">
           <div className="flex min-w-0 items-center justify-end">
-            {props.footerLeading}
-            {props.message || props.previewText ? (
+            {props.footerLeading || props.message || props.previewText || props.removeControl ? (
               <span className="flex items-center opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/queued:opacity-100">
+                {props.footerLeading}
                 {props.footerLeading ? <MetaDot /> : null}
                 <span className="flex items-center gap-1">
                   {attribution === "agent" && senderThreadId ? (

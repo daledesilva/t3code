@@ -633,7 +633,7 @@ function QueuedMessage(props: {
       <div className="flex w-full flex-col items-end gap-1">
         <div
           className={cn(
-            "flex w-full items-center justify-end gap-1.5",
+            "relative flex w-full items-center justify-end gap-1.5",
             fold !== null && expanded && "w-full",
           )}
         >
@@ -717,7 +717,7 @@ function QueuedMessage(props: {
                         <TooltipTrigger
                           nativeButton={false}
                           render={
-                            <span className="ms-1 inline-block translate-y-px align-baseline leading-none text-muted-foreground" />
+                            <span className="ms-3 inline-block translate-y-px align-baseline leading-none text-muted-foreground" />
                           }
                         >
                           <PencilIcon
@@ -737,30 +737,30 @@ function QueuedMessage(props: {
             ) : null}
           </div>
           {props.reorder ? (
-            <Tooltip>
-              <TooltipTrigger
-                render={<span className="flex size-6 cursor-grab active:cursor-grabbing" />}
-              >
-                <button
-                  type="button"
-                  aria-label="Reorder queued message"
-                  className="flex size-6 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground active:cursor-grabbing"
-                  {...props.reorder.attributes}
-                  {...props.reorder.listeners}
+            <div className="absolute start-full top-1/2 ms-1.5 -translate-y-1/2">
+              <Tooltip>
+                <TooltipTrigger
+                  render={<span className="flex size-6 cursor-grab active:cursor-grabbing" />}
                 >
-                  <QueueDragGrip />
-                </button>
-              </TooltipTrigger>
-              <TooltipPopup>Drag to reorder</TooltipPopup>
-            </Tooltip>
+                  <button
+                    type="button"
+                    aria-label="Reorder queued message"
+                    className="flex size-6 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground active:cursor-grabbing"
+                    {...props.reorder.attributes}
+                    {...props.reorder.listeners}
+                  >
+                    <QueueDragGrip />
+                  </button>
+                </TooltipTrigger>
+                <TooltipPopup>Drag to reorder</TooltipPopup>
+              </Tooltip>
+            </div>
           ) : null}
         </div>
         <div className="flex w-full items-center justify-end gap-1.5 text-xs text-muted-foreground">
           <div className="flex min-w-0 items-center justify-end">
             {props.footerLeading || props.message || props.previewText || props.removeControl ? (
               <span className="flex items-center opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/queued:opacity-100">
-                {props.footerLeading}
-                {props.footerLeading ? <MetaDot /> : null}
                 <span className="flex items-center gap-1">
                   {attribution === "agent" && senderThreadId ? (
                     <InlineButton tone="muted" onClick={() => props.onOpenThread(senderThreadId)}>
@@ -799,6 +799,12 @@ function QueuedMessage(props: {
                     />
                   ) : null}
                 </span>
+                {props.footerLeading ? (
+                  <>
+                    <MetaDot />
+                    {props.footerLeading}
+                  </>
+                ) : null}
                 {props.removeControl ? (
                   <>
                     <MetaDot />
@@ -809,7 +815,6 @@ function QueuedMessage(props: {
             ) : null}
             {props.children}
           </div>
-          {props.reorder ? <div className="w-6 shrink-0" /> : null}
         </div>
       </div>
     </>

@@ -3066,7 +3066,6 @@ export default function ChatView(props: ChatViewProps) {
             openQuestionCount: pendingUserInputs.length,
           })}
           onEditQueuedRun={queuedRunEdit.beginEdit}
-          onCancelEdit={queuedRunEdit.cancelEdit}
           timestampFormat={timestampFormat}
           onOpenThread={onOpenRelatedThreadStable}
         />
@@ -3780,6 +3779,7 @@ export default function ChatView(props: ChatViewProps) {
                                 onExpandImage={onExpandTimelineImageStable}
                                 onFileOpen={openFileAttachmentStable}
                                 editingQueuedAttachments={queuedRunEdit.editingAttachments}
+                                onCancelQueuedEdit={queuedRunEdit.cancelEdit}
                                 isPausedOnEditingQueuedMessage={
                                   queuedRunEdit.editingRunId !== null &&
                                   phase !== "running" &&

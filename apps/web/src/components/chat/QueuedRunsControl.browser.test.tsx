@@ -58,7 +58,6 @@ const baseProps = {
   editingRunId: null,
   editBlockedReason: null,
   onEditQueuedRun: () => undefined,
-  onCancelEdit: () => undefined,
   timestampFormat: "locale",
   onOpenThread: () => undefined,
 } satisfies ComponentProps<typeof QueuedRunsControl>;

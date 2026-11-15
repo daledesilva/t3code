@@ -110,7 +110,6 @@ export function QueuedRunsControl({
   /** Set while something else holds the composer, such as an open question. */
   readonly editBlockedReason: string | null;
   readonly onEditQueuedRun: (request: EditQueuedRunRequest) => void;
-  readonly onCancelEdit: () => void;
   readonly timestampFormat: TimestampFormat;
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
@@ -455,17 +454,7 @@ export function QueuedRunsControl({
                         </span>
                       ) : null}
                       {isEditing ? (
-                        <>
-                          <span className="px-1 text-foreground">Editing in the composer</span>
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            aria-label="Cancel editing queued message"
-                            onClick={props.onCancelEdit}
-                          >
-                            Cancel
-                          </Button>
-                        </>
+                        <span className="px-1 text-foreground">Editing in the composer</span>
                       ) : null}
                     </QueuedMessage>
                   )}

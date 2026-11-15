@@ -468,6 +468,7 @@ export interface ChatComposerProps {
     readonly url: string | null;
   }> | null;
   isPausedOnEditingQueuedMessage?: boolean;
+  onCancelQueuedEdit?: () => void;
   onRemoveEditingQueuedAttachment: (attachmentId: string) => void;
 
   onCompactContext: () => void;
@@ -609,6 +610,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onFileOpen,
     editingQueuedAttachments,
     isPausedOnEditingQueuedMessage = false,
+    onCancelQueuedEdit,
     onRemoveEditingQueuedAttachment,
   } = props;
   const activeContextWindow = deriveLatestContextWindowSnapshot(
@@ -3335,6 +3337,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           : "The AI will pause once it reaches this prompt until you click Cancel or Save."}
                       </span>
                     </ComposerBanner.Content>
+                    {onCancelQueuedEdit ? (
+                      <ComposerBanner.Actions>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          aria-label="Cancel editing queued message"
+                          onClick={onCancelQueuedEdit}
+                        >
+                          Cancel
+                        </Button>
+                      </ComposerBanner.Actions>
+                    ) : null}
                   </ComposerBanner.Row>
                 ) : !isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan ? (
                   <ComposerPlanFollowUpBanner

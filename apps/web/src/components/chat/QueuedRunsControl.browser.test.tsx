@@ -8,6 +8,7 @@ import { page } from "vite-plus/test/browser";
 const state = vi.hoisted(() => ({
   projection: null as unknown,
   workflow: null as unknown,
+  commands: vi.fn<(value: unknown) => Promise<void>>(async () => undefined),
 }));
 
 vi.mock(import("@t3tools/client-runtime/state/thread-workflows"), async (importOriginal) => ({
@@ -31,7 +32,7 @@ vi.mock(import("../../state/query"), async (importOriginal) => ({
 
 vi.mock(import("../../state/use-atom-command"), async (importOriginal) => ({
   ...(await importOriginal()),
-  useAtomCommand: (() => async () => undefined) as never,
+  useAtomCommand: (() => state.commands) as never,
 }));
 
 vi.mock(import("../../assets/assetUrls"), async (importOriginal) => ({
@@ -47,6 +48,7 @@ import { QueuedRunsControl } from "./QueuedRunsControl";
 function setup() {
   state.projection = null;
   state.workflow = null;
+  state.commands.mockClear();
 }
 
 const baseProps = {
@@ -109,6 +111,19 @@ it("previews assistant quotes as readable text and preserves the citation when e
   expect(onEditQueuedRun).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({ text: quoteAndText }),
   );
+
+  await expect
+    .element(page.getByRole("button", { name: "Reorder queued message", exact: true }).first())
+    .toBeVisible();
+  await page.getByRole("button", { name: "Merge", exact: true }).click();
+  expect(state.commands).toHaveBeenCalledExactlyOnceWith({
+    environmentId: "environment:test",
+    input: {
+      threadId: "thread:test",
+      targetRunId: "run:quote-only",
+      sourceRunId: "run:quote-and-text",
+    },
+  });
 });
 
 it("shows who sent a queued message and folds automation and agent prompts", async () => {

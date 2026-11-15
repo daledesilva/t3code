@@ -6853,6 +6853,125 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         })
         .pipe(Effect.flip);
       assert.equal(cancelAgainError._tag, "OrchestratorDispatchError");
+
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-queued-merge-1"),
+        threadId,
+        messageId: MessageId.make("runtime-layer-queued-merge-1"),
+        text: "First queued prompt",
+        attachments: [],
+        modelSelection,
+        dispatchMode: { type: "queue_after_active" },
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-queued-merge-2"),
+        threadId,
+        messageId: MessageId.make("runtime-layer-queued-merge-2"),
+        text: "Second queued prompt",
+        attachments: [],
+        modelSelection,
+        dispatchMode: { type: "queue_after_active" },
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-queued-merge-3"),
+        threadId,
+        messageId: MessageId.make("runtime-layer-queued-merge-3"),
+        text: "Third queued prompt",
+        attachments: [],
+        modelSelection,
+        dispatchMode: { type: "queue_after_active" },
+      });
+
+      const beforeMerge = yield* orchestrator.getThreadProjection(threadId);
+      const [firstMergeRun, secondMergeRun, thirdMergeRun] = beforeMerge.runs.filter(
+        (run) => run.status === "queued",
+      );
+      assert.isDefined(firstMergeRun);
+      assert.isDefined(secondMergeRun);
+      assert.isDefined(thirdMergeRun);
+
+      yield* orchestrator.dispatch({
+        type: "queued-run.merge",
+        commandId: CommandId.make("runtime-layer-queued-merge-exec"),
+        threadId,
+        targetRunId: firstMergeRun.id,
+        sourceRunId: secondMergeRun.id,
+      });
+
+      const afterMerge = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(
+        afterMerge.messages.find((message) => message.id === firstMergeRun.userMessageId)?.text,
+        "First queued prompt\n\nSecond queued prompt",
+      );
+      assert.equal(
+        afterMerge.runs.find((run) => run.id === secondMergeRun.id)?.status,
+        "cancelled",
+      );
+      assert.equal(afterMerge.runs.find((run) => run.id === thirdMergeRun.id)?.queuePosition, 2);
+
+      yield* orchestrator.dispatch({
+        type: "queued-run.hold",
+        commandId: CommandId.make("runtime-layer-queued-edit-hold-on"),
+        threadId,
+        runId: firstMergeRun.id,
+        reason: "edit",
+        held: true,
+      });
+
+      const activeRun = afterMerge.runs.find((run) => run.status === "starting");
+      assert.isDefined(activeRun);
+      const events = yield* EventSink.EventSinkV2;
+      const now = yield* DateTime.now;
+      yield* events.write({
+        events: [
+          {
+            id: EventId.make(`${threadId}:active-done`),
+            type: "run.updated",
+            threadId,
+            runId: activeRun.id,
+            occurredAt: now,
+            payload: { ...activeRun, status: "completed", completedAt: now },
+          },
+        ],
+      });
+      yield* orchestrator.resumeQueuedRuns;
+
+      const whileHeldForEdit = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(
+        whileHeldForEdit.runs.find((run) => run.id === firstMergeRun.id)?.status,
+        "queued",
+        "edited run must wait while edit hold is active",
+      );
+      assert.equal(
+        whileHeldForEdit.runs.find((run) => run.id === thirdMergeRun.id)?.status,
+        "queued",
+        "later queued runs must not skip ahead of a run being edited",
+      );
+
+      yield* orchestrator.dispatch({
+        type: "queued-run.hold",
+        commandId: CommandId.make("runtime-layer-queued-edit-hold-off"),
+        threadId,
+        runId: firstMergeRun.id,
+        reason: "edit",
+        held: false,
+      });
+
+      const afterHoldReleased = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(
+        afterHoldReleased.runs.find((run) => run.id === firstMergeRun.id)?.status,
+        "starting",
+        "releasing the edit hold starts the waiting prompt when the thread is idle",
+      );
     }),
   );
 });

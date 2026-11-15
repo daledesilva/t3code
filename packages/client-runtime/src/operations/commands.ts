@@ -13,6 +13,7 @@ import {
   type NodeId,
   type OrchestrationV2Command,
   type OrchestrationV2CreationSource,
+  type OrchestrationV2QueueHoldReason,
   type PlanId,
   type ProjectId,
   type ProjectIconOverride,
@@ -248,6 +249,22 @@ export interface PromoteQueuedRunInput extends ThreadCommandInput {
 
 export interface CancelQueuedRunInput extends ThreadCommandInput {
   readonly runId: RunId;
+}
+
+export interface ReorderQueuedRunInput extends ThreadCommandInput {
+  readonly runId: RunId;
+  readonly beforeRunId: RunId | null;
+}
+
+export interface HoldQueuedRunInput extends ThreadCommandInput {
+  readonly runId: RunId;
+  readonly reason?: OrchestrationV2QueueHoldReason;
+  readonly held: boolean;
+}
+
+export interface MergeQueuedRunsInput extends ThreadCommandInput {
+  readonly targetRunId: RunId;
+  readonly sourceRunId: RunId;
 }
 
 export interface RetryWorkspacePreparationInput extends ThreadCommandInput {
@@ -1058,6 +1075,43 @@ export const cancelQueuedRun = Effect.fn("EnvironmentCommands.cancelQueuedRun")(
     commandId: yield* allocateCommandId(input),
     threadId: input.threadId,
     runId: input.runId,
+  });
+});
+
+export const reorderQueuedRun = Effect.fn("EnvironmentCommands.reorderQueuedRun")(function* (
+  input: ReorderQueuedRunInput,
+) {
+  return yield* dispatch({
+    type: "queued-run.reorder",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    runId: input.runId,
+    beforeRunId: input.beforeRunId,
+  });
+});
+
+export const holdQueuedRun = Effect.fn("EnvironmentCommands.holdQueuedRun")(function* (
+  input: HoldQueuedRunInput,
+) {
+  return yield* dispatch({
+    type: "queued-run.hold",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    runId: input.runId,
+    ...(input.reason === undefined ? {} : { reason: input.reason }),
+    held: input.held,
+  });
+});
+
+export const mergeQueuedRuns = Effect.fn("EnvironmentCommands.mergeQueuedRuns")(function* (
+  input: MergeQueuedRunsInput,
+) {
+  return yield* dispatch({
+    type: "queued-run.merge",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    targetRunId: input.targetRunId,
+    sourceRunId: input.sourceRunId,
   });
 });
 

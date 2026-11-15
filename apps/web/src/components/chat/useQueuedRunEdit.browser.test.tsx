@@ -28,6 +28,9 @@ const mocks = await vi.hoisted(async () => {
   const { Atom } = await import("effect/reactivity");
   return {
     editQueuedRun: vi.fn<(value: unknown) => Promise<{ readonly _tag: "Success" | "Failure" }>>(),
+    holdQueuedRun: vi.fn<(value: unknown) => Promise<{ readonly _tag: "Success" | "Failure" }>>(),
+    holdQueuedRunCommand: {},
+    editQueuedRunCommand: {},
     // The projection's runs per thread, written by each test to stand in for the server.
     threadRuns: Atom.family((_key: string) =>
       Atom.make<ReadonlyArray<RunStatus> | null>(null).pipe(Atom.keepAlive),
@@ -36,7 +39,8 @@ const mocks = await vi.hoisted(async () => {
 });
 
 vi.mock("../../state/use-atom-command", () => ({
-  useAtomCommand: () => mocks.editQueuedRun,
+  useAtomCommand: (command: unknown) =>
+    command === mocks.holdQueuedRunCommand ? mocks.holdQueuedRun : mocks.editQueuedRun,
 }));
 
 vi.mock("../../hooks/useSettings", () => ({
@@ -51,7 +55,8 @@ vi.mock("../../state/threads", async () => {
   return {
     threadEnvironment: {
       snapshotAtom: () => Atom.make(null),
-      editQueuedRun: {},
+      editQueuedRun: mocks.editQueuedRunCommand,
+      holdQueuedRun: mocks.holdQueuedRunCommand,
     },
     environmentThreadDetails: {
       statusAtom: () => Atom.make("ready"),
@@ -137,6 +142,8 @@ function view(threadRef: ScopedThreadRef, runStatus: string, hook: { current: Ho
 
 function setup() {
   mocks.editQueuedRun.mockReset();
+  mocks.holdQueuedRun.mockReset();
+  mocks.holdQueuedRun.mockResolvedValue({ _tag: "Success" });
   useComposerDraftStore.setState({ draftsByThreadKey: {}, draftThreadsByThreadKey: {} });
   setRuns(THREAD_A, "queued");
   setRuns(THREAD_B, "queued");
@@ -269,6 +276,15 @@ describe("useQueuedRunEdit", () => {
     const { hook } = setup();
     await using screen = await render(view(THREAD_A, "queued", hook));
     await beginChangedEdit(hook);
+    expect(mocks.holdQueuedRun).toHaveBeenCalledWith({
+      environmentId: ENV,
+      input: {
+        threadId: THREAD_A.threadId,
+        runId: RUN,
+        reason: "edit",
+        held: true,
+      },
+    });
 
     await screen.rerender(view(THREAD_B, "queued", hook));
     expect(requireHook(hook).isEditing).toBe(false);
@@ -278,6 +294,17 @@ describe("useQueuedRunEdit", () => {
     expect(
       useComposerDraftStore.getState().getComposerDraft(requireHook(hook).draftTarget)?.prompt,
     ).toBe("changed");
+
+    await act(() => requireHook(hook).cancelEdit());
+    expect(mocks.holdQueuedRun).toHaveBeenLastCalledWith({
+      environmentId: ENV,
+      input: {
+        threadId: THREAD_A.threadId,
+        runId: RUN,
+        reason: "edit",
+        held: false,
+      },
+    });
   });
 
   it("moves a changed edit into the thread draft when its run starts while the user is away", async () => {

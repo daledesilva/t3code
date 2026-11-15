@@ -176,6 +176,10 @@ function useEditQueuedRunCommand() {
   return useAtomCommand(threadEnvironment.editQueuedRun, { reportFailure: false });
 }
 
+function useHoldQueuedRunCommand() {
+  return useAtomCommand(threadEnvironment.holdQueuedRun, { reportFailure: false });
+}
+
 /** Edits preserve the thread draft; attachment removals stay local until save. */
 export function useQueuedRunEdit(input: {
   readonly environmentId: EnvironmentId;
@@ -196,6 +200,7 @@ export function useQueuedRunEdit(input: {
     composerRef,
   } = input;
   const editQueuedRunCommand = useEditQueuedRunCommand();
+  const holdQueuedRunCommand = useHoldQueuedRunCommand();
   const editKey = scopedThreadKey(routeThreadRef);
   const storedEdit = useAtomValue(queuedRunEdits.atom)[editKey] ?? null;
   const editing = activeThreadId === null ? null : storedEdit;
@@ -228,13 +233,33 @@ export function useQueuedRunEdit(input: {
 
   const beginEdit = useStableCallback((request: EditQueuedRunRequest) => {
     if (activeThreadId === null) return;
-    if (editing !== null && editing.runId !== request.runId) clearEditDraft(editing.runId);
+    if (editing !== null && editing.runId !== request.runId) {
+      clearEditDraft(editing.runId);
+      void holdQueuedRunCommand({
+        environmentId,
+        input: {
+          threadId: editing.threadId,
+          runId: editing.runId,
+          reason: "edit",
+          held: false,
+        },
+      });
+    }
     const target = queuedEditDraftTarget(routeThreadRef, request.runId);
     const text = stripAttachmentOnlyBootstrapPrompt(request.text);
     const store = useComposerDraftStore.getState();
     store.clearComposerContent(target);
     store.setPrompt(target, text);
     const threadRef = { environmentId, threadId: activeThreadId };
+    void holdQueuedRunCommand({
+      environmentId,
+      input: {
+        threadId: activeThreadId,
+        runId: request.runId,
+        reason: "edit",
+        held: true,
+      },
+    });
     queuedRunEdits.begin(
       editKey,
       {
@@ -288,8 +313,18 @@ export function useQueuedRunEdit(input: {
   });
   const cancelEdit = useStableCallback(() => {
     if (editing === null) return;
-    clearEditDraft(editing.runId);
+    const { threadId, runId } = editing;
+    clearEditDraft(runId);
     queuedRunEdits.end(editKey);
+    void holdQueuedRunCommand({
+      environmentId,
+      input: {
+        threadId,
+        runId,
+        reason: "edit",
+        held: false,
+      },
+    });
     focusComposerSoon();
   });
   const removeEditingAttachment = useStableCallback((attachmentId: string) => {

@@ -238,7 +238,7 @@ import { observeResize } from "~/lib/observeResize";
 
 const isEnvironmentRequestInvalidError = Schema.is(EnvironmentRequestInvalidError);
 import { toastManager } from "../ui/toast";
-import { BuildingIcon, PlayIcon } from "lucide-react";
+import { BuildingIcon, PauseIcon, PlayIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { useManagedPolicy } from "../../state/managedPolicy";
 import { proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
@@ -1207,7 +1207,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
   const showComposerTopDrawer =
     pendingUserInputs.length > 0 ||
-    (!isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan !== null);
+    (!isComposerCollapsedMobile &&
+      ((showPlanFollowUpPrompt && activeProposedPlan !== null) || isEditingQueuedMessage));
   const showCollapsedMobilePromptRow = isComposerCollapsedMobile;
   const showComposerAttachAction =
     fileStagingLimit !== null &&
@@ -3320,6 +3321,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onAdvance={onAdvanceActivePendingUserInput}
                     onDismiss={onDismissActivePendingUserInput}
                   />
+                ) : !isComposerCollapsedMobile && isEditingQueuedMessage ? (
+                  <ComposerBanner.Row data-testid="composer-queued-edit-pause-notice">
+                    <ComposerBanner.Icon>
+                      <PauseIcon />
+                    </ComposerBanner.Icon>
+                    <ComposerBanner.Content>
+                      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                        The AI will pause once it reaches this prompt until you click Cancel or
+                        Save.
+                      </span>
+                    </ComposerBanner.Content>
+                  </ComposerBanner.Row>
                 ) : !isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan ? (
                   <ComposerPlanFollowUpBanner
                     key={activeProposedPlan.id}

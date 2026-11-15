@@ -673,6 +673,15 @@ export type OrchestrationV2ThreadLaunchWorkspaceStrategy =
 
 export const ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE = "workspace_preparation_failed";
 
+export const OrchestrationV2QueueHoldReason = Schema.Literals([
+  "stop",
+  "failure",
+  "worktree",
+  "start_after",
+  "edit",
+]);
+export type OrchestrationV2QueueHoldReason = typeof OrchestrationV2QueueHoldReason.Type;
+
 export const OrchestrationV2Run = Schema.Struct({
   id: RunId,
   threadId: ThreadId,
@@ -686,6 +695,7 @@ export const OrchestrationV2Run = Schema.Struct({
   status: OrchestrationV2RunStatus,
   queuePosition: Schema.optional(Schema.NullOr(PositiveInt)),
   queueHeld: Schema.optional(Schema.Boolean),
+  queueHoldReasons: Schema.optional(Schema.Array(OrchestrationV2QueueHoldReason)),
   requestedAt: Schema.DateTimeUtc,
   startedAt: Schema.NullOr(Schema.DateTimeUtc),
   completedAt: Schema.NullOr(Schema.DateTimeUtc),
@@ -3271,6 +3281,21 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     runId: RunId,
     beforeRunId: Schema.NullOr(RunId),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("queued-run.hold"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: RunId,
+    reason: Schema.optional(OrchestrationV2QueueHoldReason),
+    held: Schema.Boolean,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("queued-run.merge"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    targetRunId: RunId,
+    sourceRunId: RunId,
   }),
   Schema.Struct({
     type: Schema.Literal("queued-run.cancel"),

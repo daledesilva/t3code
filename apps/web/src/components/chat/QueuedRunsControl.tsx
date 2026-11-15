@@ -37,7 +37,6 @@ import {
   CalendarClockIcon,
   ChevronDownIcon,
   Clock3Icon,
-  GripVerticalIcon,
   MessagesSquareIcon,
   PencilIcon,
   XIcon,
@@ -504,6 +503,27 @@ export function QueuedRunsControl({
 // Bubble padding plus the first text line, so the controls center on that line.
 const FIRST_LINE_ALIGN = "box-content flex h-5 items-center pt-2";
 
+function MetaDot() {
+  return (
+    <span aria-hidden className="text-muted-foreground/40">
+      ·
+    </span>
+  );
+}
+
+function QueueDragGrip() {
+  return (
+    <span aria-hidden className="flex h-full flex-col items-center justify-between py-1.5">
+      {Array.from({ length: 5 }, (_, row) => (
+        <span key={row} className="flex gap-0.5">
+          <span className="size-0.5 rounded-full bg-current" />
+          <span className="size-0.5 rounded-full bg-current" />
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function MergeQueuedMessagesIcon() {
   return (
     <svg
@@ -633,159 +653,175 @@ function QueuedMessage(props: {
         {props.leadingControl ? (
           <div className={FIRST_LINE_ALIGN}>{props.leadingControl}</div>
         ) : null}
-        {/* Dashed and unfilled: a turn that has not been sent yet. */}
-        <div
-          role={bubbleIsButton ? "button" : undefined}
-          tabIndex={bubbleIsButton ? 0 : undefined}
-          aria-label={bubbleIsButton ? "Edit queued message" : undefined}
-          {...bubbleReorderListeners}
-          onClick={(event) => {
-            if (!props.onEdit) return;
-            const target = event.target;
-            if (target instanceof Element && target.closest("button, a")) return;
-            props.onEdit();
-          }}
-          onKeyDown={(event) => {
-            reorderKeyDown?.(event);
-            if (!bubbleIsButton || event.target !== event.currentTarget) return;
-            if (event.key !== "Enter" && event.key !== " ") return;
-            event.preventDefault();
-            props.onEdit?.();
-          }}
-          className={cn(
-            "flex min-w-0 max-w-[80%] flex-col rounded-2xl border border-dashed text-start text-sm",
-            props.onEdit && "cursor-pointer",
-            props.isEditing
-              ? "border-primary/60 text-foreground"
-              : attribution === "guest"
-                ? "border-guest/50 text-muted-foreground"
-                : "border-muted-foreground/40 text-muted-foreground",
-            fold === null && "px-3 py-2",
-            fold !== null && expanded && "w-full",
-          )}
-        >
-          {fold ? (
-            <FoldedMessageHeader
-              icon={fold.icon}
-              label={fold.label}
-              summary={fold.summary}
-              expanded={expanded}
-              onToggle={() => setExpanded((value) => !value)}
-            />
-          ) : null}
-          {bodyVisible ? (
+        <div className="flex min-w-0 max-w-[80%] flex-col items-end">
+          <div className="flex w-full items-stretch gap-1.5">
+            {/* Dashed and unfilled: a turn that has not been sent yet. */}
             <div
+              role={bubbleIsButton ? "button" : undefined}
+              tabIndex={bubbleIsButton ? 0 : undefined}
+              aria-label={bubbleIsButton ? "Edit queued message" : undefined}
+              {...bubbleReorderListeners}
+              onClick={(event) => {
+                if (!props.onEdit) return;
+                const target = event.target;
+                if (target instanceof Element && target.closest("button, a")) return;
+                props.onEdit();
+              }}
+              onKeyDown={(event) => {
+                reorderKeyDown?.(event);
+                if (!bubbleIsButton || event.target !== event.currentTarget) return;
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                props.onEdit?.();
+              }}
               className={cn(
-                "flex flex-col gap-2",
-                fold !== null && "max-h-96 overflow-auto px-3 pb-2",
+                "flex min-w-0 flex-1 flex-col rounded-2xl border border-dashed text-start text-sm",
+                props.onEdit && "cursor-pointer",
+                props.isEditing
+                  ? "border-primary/60 text-foreground"
+                  : attribution === "guest"
+                    ? "border-guest/50 text-muted-foreground"
+                    : "border-muted-foreground/40 text-muted-foreground",
+                fold === null && "px-3 py-2",
+                fold !== null && expanded && "w-full",
               )}
             >
-              {props.thumbnails.length > 0 ? (
-                <span className="flex flex-wrap items-center gap-1">
-                  {props.thumbnails.map((thumbnail) => (
-                    <span
-                      key={thumbnail.key}
-                      className="size-8 overflow-hidden rounded-md border border-border/70 bg-background"
-                    >
-                      {thumbnail.url ? (
-                        <img
-                          src={thumbnail.url}
-                          alt={thumbnail.name}
-                          className="size-full object-cover"
-                        />
-                      ) : (
-                        <span aria-label={thumbnail.name} className="block size-full bg-muted/60" />
-                      )}
-                    </span>
-                  ))}
-                </span>
+              {fold ? (
+                <FoldedMessageHeader
+                  icon={fold.icon}
+                  label={fold.label}
+                  summary={fold.summary}
+                  expanded={expanded}
+                  onToggle={() => setExpanded((value) => !value)}
+                />
               ) : null}
-              {/* In full, like a sent turn: a queued message is read before it is sent. */}
-              {props.previewText || props.onEdit ? (
-                <p className="whitespace-pre-wrap wrap-anywhere">
-                  {props.previewText}
-                  {props.onEdit ? (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <span className="ms-1 inline-block translate-y-px text-muted-foreground/80" />
-                        }
-                      >
-                        <PencilIcon aria-hidden className="size-3.5" />
-                      </TooltipTrigger>
-                      <TooltipPopup>{props.editLabel}</TooltipPopup>
-                    </Tooltip>
+              {bodyVisible ? (
+                <div
+                  className={cn(
+                    "flex flex-col gap-2",
+                    fold !== null && "max-h-96 overflow-auto px-3 pb-2",
+                  )}
+                >
+                  {props.thumbnails.length > 0 ? (
+                    <span className="flex flex-wrap items-center gap-1">
+                      {props.thumbnails.map((thumbnail) => (
+                        <span
+                          key={thumbnail.key}
+                          className="size-8 overflow-hidden rounded-md border border-border/70 bg-background"
+                        >
+                          {thumbnail.url ? (
+                            <img
+                              src={thumbnail.url}
+                              alt={thumbnail.name}
+                              className="size-full object-cover"
+                            />
+                          ) : (
+                            <span
+                              aria-label={thumbnail.name}
+                              className="block size-full bg-muted/60"
+                            />
+                          )}
+                        </span>
+                      ))}
+                    </span>
                   ) : null}
-                </p>
+                  {/* In full, like a sent turn: a queued message is read before it is sent. */}
+                  {props.previewText || props.onEdit ? (
+                    <p className="whitespace-pre-wrap wrap-anywhere">
+                      {props.previewText}
+                      {props.onEdit ? (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <span className="ms-1 inline-block align-baseline text-muted-foreground/80" />
+                            }
+                          >
+                            <PencilIcon aria-hidden className="inline size-3.5 align-baseline" />
+                          </TooltipTrigger>
+                          <TooltipPopup>{props.editLabel}</TooltipPopup>
+                        </Tooltip>
+                      ) : null}
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
             </div>
-          ) : null}
-        </div>
-        {props.reorder ? (
-          <div className={FIRST_LINE_ALIGN}>
-            <Tooltip>
-              <TooltipTrigger
-                render={<span className="flex shrink-0 cursor-grab active:cursor-grabbing" />}
-              >
-                <Button
-                  size="icon-xs"
-                  variant="ghost-muted"
-                  aria-label="Reorder queued message"
-                  {...props.reorder.attributes}
-                  {...props.reorder.listeners}
-                >
-                  <GripVerticalIcon />
-                </Button>
-              </TooltipTrigger>
-              <TooltipPopup>Hold and drag to reorder</TooltipPopup>
-            </Tooltip>
+            {props.reorder ? (
+              <div className="flex self-stretch">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<span className="flex h-full cursor-grab active:cursor-grabbing" />}
+                  >
+                    <button
+                      type="button"
+                      aria-label="Reorder queued message"
+                      className="flex h-full w-6 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground active:cursor-grabbing"
+                      {...props.reorder.attributes}
+                      {...props.reorder.listeners}
+                    >
+                      <QueueDragGrip />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipPopup>Hold and drag to reorder</TooltipPopup>
+                </Tooltip>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
-      <div className="flex items-center gap-1 pe-1 text-xs text-muted-foreground">
-        {props.footerLeading}
-        {props.message || props.previewText ? (
-          <span className="flex items-center gap-1 px-1 opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/queued:opacity-100">
-            {attribution === "agent" && senderThreadId ? (
-              <InlineButton tone="muted" onClick={() => props.onOpenThread(senderThreadId)}>
-                Open thread
-              </InlineButton>
-            ) : null}
-            {scheduledTaskId ? (
-              <InlineButton
-                tone="muted"
-                render={
-                  <Link
-                    to="/settings/scheduled-tasks"
-                    search={{ environmentId: props.environmentId, taskId: scheduledTaskId }}
-                  />
-                }
-              >
-                Open automation
-              </InlineButton>
-            ) : null}
-            {props.message ? (
-              <TimelineRowTimestamp
-                createdAt={DateTime.formatIso(props.message.createdAt)}
-                timestampFormat={props.timestampFormat}
-                alwaysVisible
-              />
-            ) : null}
-            {props.previewText ? (
-              <MessageCopyButton text={props.previewText} variant="ghost" />
-            ) : null}
-            {promptLink !== null ? (
-              <MessageCopyButton
-                text={promptLink}
-                label="Copy prompt link"
-                icon={LinkIconNode}
-                variant="ghost"
-              />
-            ) : null}
-            {props.removeControl}
-          </span>
-        ) : null}
-        {props.children}
+          <div className="mt-1 flex w-full gap-1.5 text-xs text-muted-foreground">
+            <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
+              {props.footerLeading}
+              {props.message || props.previewText ? (
+                <span className="flex items-center gap-1 px-1 opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/queued:opacity-100">
+                  {props.footerLeading ? <MetaDot /> : null}
+                  {attribution === "agent" && senderThreadId ? (
+                    <InlineButton tone="muted" onClick={() => props.onOpenThread(senderThreadId)}>
+                      Open thread
+                    </InlineButton>
+                  ) : null}
+                  {scheduledTaskId ? (
+                    <InlineButton
+                      tone="muted"
+                      render={
+                        <Link
+                          to="/settings/scheduled-tasks"
+                          search={{ environmentId: props.environmentId, taskId: scheduledTaskId }}
+                        />
+                      }
+                    >
+                      Open automation
+                    </InlineButton>
+                  ) : null}
+                  {props.message ? (
+                    <TimelineRowTimestamp
+                      createdAt={DateTime.formatIso(props.message.createdAt)}
+                      timestampFormat={props.timestampFormat}
+                      alwaysVisible
+                    />
+                  ) : null}
+                  {props.previewText ? (
+                    <MessageCopyButton text={props.previewText} variant="ghost" />
+                  ) : null}
+                  {promptLink !== null ? (
+                    <MessageCopyButton
+                      text={promptLink}
+                      label="Copy prompt link"
+                      icon={LinkIconNode}
+                      variant="ghost"
+                    />
+                  ) : null}
+                  {props.removeControl ? (
+                    <>
+                      <MetaDot />
+                      {props.removeControl}
+                    </>
+                  ) : null}
+                </span>
+              ) : null}
+              {props.children}
+            </div>
+            {props.reorder ? <div className="w-6 shrink-0" /> : null}
+          </div>
+        </div>
       </div>
     </>
   );

@@ -3327,16 +3327,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   />
                 ) : !isComposerCollapsedMobile && isEditingQueuedMessage ? (
                   <ComposerBanner.Row data-testid="composer-queued-edit-pause-notice">
-                    <ComposerBanner.Icon>
+                    <ComposerBanner.Icon
+                      className={
+                        isPausedOnEditingQueuedMessage ? "text-success-foreground" : undefined
+                      }
+                    >
                       <PauseIcon />
                     </ComposerBanner.Icon>
                     <ComposerBanner.Content>
                       <span
                         className={cn(
                           "min-w-0 flex-1 truncate",
-                          isPausedOnEditingQueuedMessage
-                            ? "text-success-foreground"
-                            : "text-muted-foreground",
+                          isPausedOnEditingQueuedMessage ? "text-white" : "text-muted-foreground",
                         )}
                       >
                         {isPausedOnEditingQueuedMessage

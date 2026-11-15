@@ -6958,6 +6958,42 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       );
 
       yield* orchestrator.dispatch({
+        type: "queued-run.reorder",
+        commandId: CommandId.make("runtime-layer-queued-edit-reorder-behind"),
+        threadId,
+        runId: firstMergeRun.id,
+        beforeRunId: null,
+      });
+
+      const afterReorderWhileHeld = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(
+        afterReorderWhileHeld.runs.find((run) => run.id === thirdMergeRun.id)?.status,
+        "starting",
+        "reordering an edited run behind an available run starts the newly leading run",
+      );
+      assert.equal(
+        afterReorderWhileHeld.runs.find((run) => run.id === firstMergeRun.id)?.status,
+        "queued",
+        "the edited run remains queued while its edit hold is active",
+      );
+
+      const thirdStarted = afterReorderWhileHeld.runs.find((run) => run.id === thirdMergeRun.id);
+      assert.isDefined(thirdStarted);
+      yield* events.write({
+        events: [
+          {
+            id: EventId.make(`${threadId}:third-done`),
+            type: "run.updated",
+            threadId,
+            runId: thirdStarted.id,
+            occurredAt: now,
+            payload: { ...thirdStarted, status: "completed", completedAt: now },
+          },
+        ],
+      });
+      yield* orchestrator.resumeQueuedRuns;
+
+      yield* orchestrator.dispatch({
         type: "queued-run.hold",
         commandId: CommandId.make("runtime-layer-queued-edit-hold-off"),
         threadId,

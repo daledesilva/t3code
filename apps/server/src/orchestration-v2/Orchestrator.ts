@@ -14161,6 +14161,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       command.type === "queue.resume" ||
       command.type === "queued-run.start" ||
       command.type === "queued-run.edit" ||
+      command.type === "queued-run.reorder" ||
       (command.type === "queued-run.hold" && !command.held)
     ) {
       yield* mapDispatchError(command)(
@@ -14382,6 +14383,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       command.type === "queue.resume" ||
       command.type === "queued-run.start" ||
       command.type === "queued-run.edit" ||
+      command.type === "queued-run.reorder" ||
       (command.type === "queued-run.hold" && !command.held) ||
       (command.type === "thread.runtime-mode.set" && runtimeModeCeiling !== undefined)
     ) {

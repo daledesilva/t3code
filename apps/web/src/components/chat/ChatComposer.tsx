@@ -467,6 +467,7 @@ export interface ChatComposerProps {
     readonly attachment: ContractChatAttachment;
     readonly url: string | null;
   }> | null;
+  isPausedOnEditingQueuedMessage?: boolean;
   onRemoveEditingQueuedAttachment: (attachmentId: string) => void;
 
   onCompactContext: () => void;
@@ -607,6 +608,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onExpandImage,
     onFileOpen,
     editingQueuedAttachments,
+    isPausedOnEditingQueuedMessage = false,
     onRemoveEditingQueuedAttachment,
   } = props;
   const activeContextWindow = deriveLatestContextWindowSnapshot(
@@ -3328,8 +3330,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     </ComposerBanner.Icon>
                     <ComposerBanner.Content>
                       <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                        The AI will pause once it reaches this prompt until you click Cancel or
-                        Save.
+                        {isPausedOnEditingQueuedMessage
+                          ? "The thread is paused until you save, cancel, or reorder this prompt."
+                          : "The AI will pause once it reaches this prompt until you click Cancel or Save."}
                       </span>
                     </ComposerBanner.Content>
                   </ComposerBanner.Row>

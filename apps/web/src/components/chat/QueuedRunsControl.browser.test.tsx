@@ -115,6 +115,12 @@ it("previews assistant quotes as readable text and preserves the citation when e
   await expect
     .element(page.getByRole("button", { name: "Reorder queued message", exact: true }).first())
     .toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: "Copy message", exact: true }).first())
+    .toBeInTheDocument();
+  await expect
+    .element(page.getByRole("button", { name: "Copy prompt link", exact: true }).first())
+    .toBeInTheDocument();
   await page.getByRole("button", { name: "Merge", exact: true }).click();
   expect(state.commands).toHaveBeenCalledExactlyOnceWith({
     environmentId: "environment:test",

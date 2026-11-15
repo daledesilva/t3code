@@ -90,6 +90,7 @@ import {
   workflowOpeningParentThreadId,
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
+  deriveThreadQueueWorkflowState,
   getUserQueuedThreadRuns,
   threadSupportsProviderHandoff,
 } from "@t3tools/client-runtime/state/thread-workflows";
@@ -3779,6 +3780,13 @@ export default function ChatView(props: ChatViewProps) {
                                 onExpandImage={onExpandTimelineImageStable}
                                 onFileOpen={openFileAttachmentStable}
                                 editingQueuedAttachments={queuedRunEdit.editingAttachments}
+                                isPausedOnEditingQueuedMessage={
+                                  queuedRunEdit.editingRunId !== null &&
+                                  phase !== "running" &&
+                                  serverProjection !== null &&
+                                  deriveThreadQueueWorkflowState(serverProjection).queuedRuns[0]
+                                    ?.run.id === queuedRunEdit.editingRunId
+                                }
                                 onRemoveEditingQueuedAttachment={
                                   queuedRunEdit.removeEditingAttachment
                                 }

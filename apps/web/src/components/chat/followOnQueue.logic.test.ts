@@ -13,7 +13,7 @@ import {
 const environmentId = EnvironmentId.make("environment-local");
 
 function makeQueueThread(
-  overrides: Partial<FollowOnQueueThreadInput> & { id: string },
+  overrides: Omit<Partial<FollowOnQueueThreadInput>, "id"> & { id: string },
 ): FollowOnQueueThreadInput {
   return {
     environmentId,

@@ -1,5 +1,7 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import { msg } from "gt-react";
+import { m, type MessageResolver } from "../../i18n/messages";
 import { resolveSidebarThreadStatus, type SidebarThreadStatus } from "../Sidebar.logic";
 
 export type FollowOnQueueThreadInput = Pick<
@@ -72,12 +74,16 @@ export function isSidebarThreadEligibleForFollowOnQueue(thread: FollowOnQueueThr
   );
 }
 
-export function toFollowOnQueueItem(thread: FollowOnQueueThreadInput): FollowOnQueueItem {
+/** Components pass `useMessages()` so the fallback title follows a language switch. */
+export function toFollowOnQueueItem(
+  thread: FollowOnQueueThreadInput,
+  resolve: MessageResolver = m,
+): FollowOnQueueItem {
   const status = resolveSidebarThreadStatus(thread);
   return {
     id: thread.id,
     environmentId: thread.environmentId,
-    title: thread.title.trim() || "Untitled thread",
+    title: thread.title.trim() || resolve(msg("Untitled thread")),
     branch: thread.branch ?? null,
     isRunning: status === "working" || status === "preparing",
     status,
@@ -89,8 +95,9 @@ export function buildFollowOnQueueLists(input: {
   readonly threads: ReadonlyArray<FollowOnQueueThreadInput>;
   readonly priorThreadId: ThreadId | null;
   readonly currentThreadId?: ThreadId | null | undefined;
+  readonly resolve?: MessageResolver | undefined;
 }): FollowOnQueueLists {
-  const { threads, priorThreadId, currentThreadId = null } = input;
+  const { threads, priorThreadId, currentThreadId = null, resolve = m } = input;
   if (priorThreadId === null) {
     return { beforeQueue: [], afterQueue: [] };
   }
@@ -113,14 +120,14 @@ export function buildFollowOnQueueLists(input: {
   let cursor: FollowOnQueueThreadInput | undefined = priorThread;
   while (cursor !== undefined && !visited.has(cursor.id)) {
     visited.add(cursor.id);
-    beforeChainReversed.push(toFollowOnQueueItem(cursor));
-    cursor = cursor.startAfterThreadId !== null ? byId.get(cursor.startAfterThreadId) : undefined;
+    beforeChainReversed.push(toFollowOnQueueItem(cursor, resolve));
+    cursor = cursor.startAfterThreadId != null ? byId.get(cursor.startAfterThreadId) : undefined;
   }
   const beforeQueue = beforeChainReversed.reverse();
 
   const followersByPredecessor = new Map<ThreadId, FollowOnQueueThreadInput[]>();
   for (const thread of activeThreads) {
-    if (thread.startAfterThreadId === null || thread.id === currentThreadId) continue;
+    if (thread.startAfterThreadId == null || thread.id === currentThreadId) continue;
     const list = followersByPredecessor.get(thread.startAfterThreadId) ?? [];
     list.push(thread);
     followersByPredecessor.set(thread.startAfterThreadId, list);
@@ -143,7 +150,7 @@ export function buildFollowOnQueueLists(input: {
     for (const follower of followers) {
       if (visited.has(follower.id)) continue;
       visited.add(follower.id);
-      afterQueue.push(toFollowOnQueueItem(follower));
+      afterQueue.push(toFollowOnQueueItem(follower, resolve));
       queueSeeds.push(follower.id);
     }
   }

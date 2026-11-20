@@ -19,6 +19,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
 import { CircleDashedIcon, CircleDotDashedIcon, GripVerticalIcon } from "lucide-react";
+import { T, useGT } from "gt-react";
 import { useRef } from "react";
 
 import { cn } from "~/lib/utils";
@@ -27,10 +28,6 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { type FollowOnQueueItem, planFollowOnQueueReorder } from "./followOnQueue.logic";
 import { threadContextDropTargetProps, useThreadContextDrop } from "./threadContextDrag";
-
-function capitalize(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
 
 function QueueDropSlot({
   environmentId,
@@ -45,6 +42,7 @@ function QueueDropSlot({
   readonly empty?: boolean | undefined;
   readonly onDropThreads: (refs: ReadonlyArray<ScopedThreadRef>) => void;
 }) {
+  const gt = useGT();
   const ref = useRef<HTMLDivElement | null>(null);
   useThreadContextDrop(ref, environmentId, slotKey, (refs) => {
     onDropThreads(refs);
@@ -58,7 +56,7 @@ function QueueDropSlot({
         data-testid="follow-on-queue-empty-dropzone"
         className="flex items-center justify-center rounded-lg border border-dashed border-border/80 bg-card/50 px-3 py-2.5 text-xs text-muted-foreground transition-colors data-[thread-context-over=true]:border-primary data-[thread-context-over=true]:bg-primary/8 data-[thread-context-over=true]:text-foreground"
       >
-        {label ?? "Drop here to complete prior"}
+        {label ?? gt("Drop here to complete prior")}
       </div>
     );
   }
@@ -84,6 +82,7 @@ function SortableQueueItemRow({
   readonly canReorder: boolean;
   readonly onRemove?: ((threadId: ThreadId) => void) | undefined;
 }) {
+  const gt = useGT();
   const disabled = !canReorder || item.isRunning;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.id,
@@ -105,7 +104,7 @@ function SortableQueueItemRow({
       {canReorder ? (
         <button
           type="button"
-          aria-label={`Reorder ${item.title}`}
+          aria-label={gt("Reorder {title}", { title: item.title })}
           disabled={disabled}
           className={cn(
             "inline-flex shrink-0 items-center text-muted-foreground/60 outline-none",
@@ -131,12 +130,12 @@ function SortableQueueItemRow({
       {item.isRunning ? (
         <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-info-foreground">
           <CircleDashedIcon aria-hidden className="size-3 shrink-0" />
-          Working
+          <T>Working</T>
         </span>
       ) : (
         <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-muted-foreground">
           <CircleDotDashedIcon aria-hidden className="size-3 shrink-0" />
-          Waiting
+          <T>Waiting</T>
         </span>
       )}
 
@@ -144,10 +143,10 @@ function SortableQueueItemRow({
         <Button
           size="micro"
           variant="ghost-muted"
-          aria-label={`Remove ${item.title} from the queue`}
+          aria-label={gt("Remove {title} from the queue", { title: item.title })}
           onClick={() => onRemove(item.id)}
         >
-          Remove
+          <T>Remove</T>
         </Button>
       ) : null}
     </li>
@@ -184,6 +183,7 @@ export function FollowOnQueueSection({
     | ((refs: ReadonlyArray<ScopedThreadRef>, insertIndex: number) => void)
     | undefined;
 }) {
+  const gt = useGT();
   const items = section === "before" ? beforeQueue : afterQueue;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -197,12 +197,15 @@ export function FollowOnQueueSection({
     return null;
   }
 
-  const subject = newThread ? "your new thread" : "this thread";
-  const title = section === "before" ? "Wait for..." : "Then run...";
+  const title = section === "before" ? gt("Wait for...") : gt("Then run...");
   const hint =
     section === "before"
-      ? `${capitalize(subject)} waits until these threads finish.`
-      : `These threads run after ${subject} finishes.`;
+      ? newThread
+        ? gt("Your new thread waits until these threads finish.")
+        : gt("This thread waits until these threads finish.")
+      : newThread
+        ? gt("These threads run after your new thread finishes.")
+        : gt("These threads run after this thread finishes.");
   const removeItem = canOperate ? onRemoveItem : undefined;
   const itemIds = items.map((item) => item.id);
   const canReorder =
@@ -251,7 +254,7 @@ export function FollowOnQueueSection({
         <QueueDropSlot
           environmentId={environmentId}
           slotKey="empty-0"
-          label="Drop here to complete prior"
+          label={gt("Drop here to complete prior")}
           empty
           onDropThreads={(refs) => onDropSidebarThread?.(refs, 0)}
         />

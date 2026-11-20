@@ -103,6 +103,7 @@ import {
   workflowOpeningParentThreadId,
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
+  deriveThreadQueueWorkflowState,
   getUserQueuedThreadRuns,
   threadSteersDuringCompaction,
   threadSupportsProviderHandoff,
@@ -866,8 +867,12 @@ export default function ChatView(props: ChatViewProps) {
   const activeRuntime = isServerThread ? serverRuntime : (activeThread?.runtime ?? null);
   const hasHeldQueuedRuns =
     isServerThread &&
-    serverProjection?.runs.some((run) => run.status === "queued" && run.queueHeld === true) ===
-      true;
+    serverProjection?.runs.some(
+      (run) =>
+        run.status === "queued" &&
+        run.queueHeld === true &&
+        !(run.queueHoldReasons?.length === 1 && run.queueHoldReasons[0] === "edit"),
+    ) === true;
   const resumableRunId =
     !isServerThread || serverProjection === null
       ? null
@@ -3135,7 +3140,6 @@ export default function ChatView(props: ChatViewProps) {
             messages,
           )}
           onEditQueuedRun={queuedRunEdit.beginEdit}
-          onCancelEdit={queuedRunEdit.cancelEdit}
           timestampFormat={timestampFormat}
           onOpenThread={onOpenRelatedThreadStable}
           onImageExpand={onExpandTimelineImageStable}
@@ -3848,6 +3852,14 @@ export default function ChatView(props: ChatViewProps) {
                                 onExpandImage={onExpandTimelineImageStable}
                                 onFileOpen={openFileAttachmentStable}
                                 editingQueuedAttachments={queuedRunEdit.editingAttachments}
+                                onCancelQueuedEdit={queuedRunEdit.cancelEdit}
+                                isPausedOnEditingQueuedMessage={
+                                  queuedRunEdit.editingRunId !== null &&
+                                  phase !== "running" &&
+                                  serverProjection !== null &&
+                                  deriveThreadQueueWorkflowState(serverProjection).queuedRuns[0]
+                                    ?.run.id === queuedRunEdit.editingRunId
+                                }
                                 onRemoveEditingQueuedAttachment={
                                   queuedRunEdit.removeEditingAttachment
                                 }

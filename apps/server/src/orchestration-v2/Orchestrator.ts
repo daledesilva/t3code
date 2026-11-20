@@ -24,6 +24,7 @@ import {
 } from "../sourceControl/threadPullRequests.ts";
 import {
   ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type ChatAttachment,
   CommandId,
   type GuestMessageId,
@@ -37,6 +38,7 @@ import {
   type OrchestrationV2InternalCommand,
   type OrchestrationV2LimitRecoveryUpdate,
   type OrchestrationV2Notification,
+  type OrchestrationV2QueueHoldReason,
   type OrchestrationV2ServerCommand,
   type ThreadPullRequestLink,
   type ThreadPullRequestWatch,
@@ -84,6 +86,10 @@ import {
 } from "@t3tools/contracts";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
+import {
+  restoreAttachmentOnlyBootstrapPrompt,
+  stripAttachmentOnlyBootstrapPrompt,
+} from "@t3tools/shared/composerContextReferences";
 import { expandAssistantCitationsForProvider } from "@t3tools/shared/assistantCitations";
 import { modelSwitchSince } from "./modelSwitch.ts";
 import { contextBoundaryOrdinal, isScheduledFreshRun } from "./contextBoundary.ts";
@@ -679,6 +685,8 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "queued-run.start":
     case "queue.resume":
     case "queued-run.reorder":
+    case "queued-run.hold":
+    case "queued-run.merge":
     case "queued-run.cancel":
     case "queued-run.edit":
     case "runtime-request.respond":
@@ -1015,10 +1023,77 @@ function worktreeSetupPending(
   );
 }
 
+function getRunHoldReasons(
+  run: Pick<OrchestrationV2Run, "queueHeld" | "queueHoldReasons">,
+): ReadonlyArray<OrchestrationV2QueueHoldReason> {
+  if (run.queueHoldReasons !== undefined && run.queueHoldReasons.length > 0) {
+    return run.queueHoldReasons;
+  }
+  return run.queueHeld === true ? ["stop"] : [];
+}
+
+function withRunHoldReasons(
+  run: OrchestrationV2Run,
+  reasons: Iterable<OrchestrationV2QueueHoldReason>,
+): OrchestrationV2Run {
+  const unique = [...new Set(reasons)];
+  const { queueHoldReasons: _prevReasons, ...rest } = run;
+  if (unique.length === 0) {
+    return { ...rest, queueHeld: false };
+  }
+  if (unique.length === 1 && unique[0] === "stop") {
+    return { ...rest, queueHeld: true };
+  }
+  return { ...rest, queueHeld: true, queueHoldReasons: unique };
+}
+
+function addRunHoldReason(
+  run: OrchestrationV2Run,
+  reason: OrchestrationV2QueueHoldReason,
+): OrchestrationV2Run {
+  return withRunHoldReasons(run, [...getRunHoldReasons(run), reason]);
+}
+
+function removeRunHoldReasons(
+  run: OrchestrationV2Run,
+  reasonsToRemove: ReadonlyArray<OrchestrationV2QueueHoldReason>,
+): OrchestrationV2Run {
+  const removeSet = new Set(reasonsToRemove);
+  return withRunHoldReasons(
+    run,
+    getRunHoldReasons(run).filter((reason) => !removeSet.has(reason)),
+  );
+}
+
+function hasRunHoldReason(
+  run: Pick<OrchestrationV2Run, "queueHeld" | "queueHoldReasons">,
+  reason: OrchestrationV2QueueHoldReason,
+): boolean {
+  return getRunHoldReasons(run).includes(reason);
+}
+
+function runHoldStateEquals(
+  left: Pick<OrchestrationV2Run, "queueHeld" | "queueHoldReasons">,
+  right: Pick<OrchestrationV2Run, "queueHeld" | "queueHoldReasons">,
+): boolean {
+  return (
+    left.queueHeld === right.queueHeld &&
+    (left.queueHoldReasons ?? []).join(",") === (right.queueHoldReasons ?? []).join(",")
+  );
+}
+
 function nextQueuedRun(
   projection: Pick<OrchestrationV2ThreadProjection, "runs" | "messages">,
 ): OrchestrationV2Run | undefined {
-  return queuedRunsInDeliveryOrder(projection).find((run) => run.queueHeld !== true);
+  for (const run of queuedRunsInDeliveryOrder(projection)) {
+    if (hasRunHoldReason(run, "edit")) {
+      return undefined;
+    }
+    if (run.queueHeld !== true) {
+      return run;
+    }
+  }
+  return undefined;
 }
 
 // Delegated completions, monitor notifications and unpinned scheduled deliveries never choose a
@@ -2601,7 +2676,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               runId: run.id,
               providerInstanceId: run.providerInstanceId,
               occurredAt: now,
-              payload: { ...run, queueHeld: true },
+              payload: addRunHoldReason(run, "stop"),
             })),
         );
         return wakes.length > 0;
@@ -2799,7 +2874,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               runId: run.id,
               providerInstanceId: run.providerInstanceId,
               occurredAt: now,
-              payload: { ...run, queueHeld: true },
+              payload: addRunHoldReason(run, "stop"),
             })),
         );
         return;
@@ -3436,7 +3511,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         .map((message) => message.id),
     );
     const now = yield* DateTime.now;
-    const released = held.filter((run) => unattended.has(run.userMessageId));
+    const released = held.filter(
+      (run) => unattended.has(run.userMessageId) && !hasRunHoldReason(run, "edit"),
+    );
     if (released.length === 0) return;
     yield* writeSystemEvents(
       released.map((run) => ({
@@ -3445,7 +3522,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         runId: run.id,
         providerInstanceId: run.providerInstanceId,
         occurredAt: now,
-        payload: { ...run, queueHeld: false },
+        payload: removeRunHoldReasons(run, ["stop", "failure", "worktree"]),
       })),
     );
   });
@@ -7858,6 +7935,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         : [];
     const releasedAt = yield* DateTime.now;
     for (const held of heldRunsToRelease) {
+      const updatedHeld = removeRunHoldReasons(held, ["stop", "failure", "worktree"]);
+      if (runHoldStateEquals(updatedHeld, held)) continue;
       yield* emit(
         events,
         command,
@@ -7867,7 +7946,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         runId: held.id,
         providerInstanceId: held.providerInstanceId,
         occurredAt: releasedAt,
-        payload: { ...held, queueHeld: false },
+        payload: updatedHeld,
       });
     }
     if (shouldQueue) {
@@ -7969,7 +8048,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               ),
             );
       const queueIsHeld = projection.runs.some(
-        (candidate) => candidate.status === "queued" && candidate.queueHeld === true,
+        (candidate) =>
+          candidate.status === "queued" &&
+          candidate.queueHeld === true &&
+          getRunHoldReasons(candidate).some((reason) => reason !== "edit"),
       );
       // Buffered wakes need a T3 run for output the CLI already started producing.
       // Stop still holds wakes that arrive before the active run settles.
@@ -12184,6 +12266,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }),
       });
     }
+    if (hasRunHoldReason(queuedRun, "edit")) {
+      yield* emitEvent({
+        type: "run.updated",
+        threadId: command.threadId,
+        runId: queuedRun.id,
+        ...(queuedRun.rootNodeId === null ? {} : { nodeId: queuedRun.rootNodeId }),
+        providerInstanceId: queuedRun.providerInstanceId,
+        occurredAt: now,
+        payload: removeRunHoldReasons(queuedRun, ["edit"]),
+      });
+    }
     // Thread deletion only cleans files the thread still references.
     const keptAttachmentIds = new Set(
       (command.attachments ?? queuedMessage.attachments).map((attachment) => attachment.id),
@@ -12205,6 +12298,254 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           },
         } satisfies PendingOrchestrationEffectV2,
       ]);
+    }
+  });
+
+  const dispatchQueuedRunHold = Effect.fn("Orchestrator.dispatchQueuedRunHold")(function* (
+    command: Extract<OrchestrationV2Command, { readonly type: "queued-run.hold" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const projection = yield* loadProjectionForCommand(command, ["runs"]);
+    const queuedRun = projection.runs.find((candidate) => candidate.id === command.runId);
+    if (queuedRun === undefined || queuedRun.status !== "queued") {
+      if (!command.held) {
+        return;
+      }
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Run ${command.runId} is not queued.`,
+      });
+    }
+    const reason = command.reason ?? "stop";
+    const updatedRun = command.held
+      ? addRunHoldReason(queuedRun, reason)
+      : removeRunHoldReasons(queuedRun, [reason]);
+    if (runHoldStateEquals(updatedRun, queuedRun)) {
+      return;
+    }
+    const now = yield* DateTime.now;
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "run.updated",
+      threadId: command.threadId,
+      runId: queuedRun.id,
+      ...(queuedRun.rootNodeId === null ? {} : { nodeId: queuedRun.rootNodeId }),
+      providerInstanceId: queuedRun.providerInstanceId,
+      occurredAt: now,
+      payload: updatedRun,
+    });
+  });
+
+  const dispatchQueuedRunMerge = Effect.fn("Orchestrator.dispatchQueuedRunMerge")(function* (
+    command: Extract<OrchestrationV2Command, { readonly type: "queued-run.merge" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    if (command.targetRunId === command.sourceRunId) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "Cannot merge a queued run with itself.",
+      });
+    }
+    const projection = yield* loadProjectionForCommand(
+      command,
+      ["runs", "messages", "nodes", "attempts", "turnItems"],
+      { turnItemTypes: ["user_message"], messageRoles: ["user"] },
+    );
+    const queuedRuns = queuedRunsInDeliveryOrder(projection);
+    const targetRun = queuedRuns.find((candidate) => candidate.id === command.targetRunId);
+    const sourceRun = queuedRuns.find((candidate) => candidate.id === command.sourceRunId);
+    if (targetRun === undefined || sourceRun === undefined) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "Both runs must be queued to merge them.",
+      });
+    }
+    const targetMessage = projection.messages.find(
+      (candidate) => candidate.id === targetRun.userMessageId,
+    );
+    const sourceMessage = projection.messages.find(
+      (candidate) => candidate.id === sourceRun.userMessageId,
+    );
+    if (targetMessage === undefined || sourceMessage === undefined) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "Queued runs must have user messages to merge.",
+      });
+    }
+    if (
+      targetMessage.delegatedCompletion !== undefined ||
+      targetMessage.notification !== undefined ||
+      sourceMessage.delegatedCompletion !== undefined ||
+      sourceMessage.notification !== undefined
+    ) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "Automatic completion deliveries cannot be merged.",
+      });
+    }
+    if (targetMessage.context?.guest !== undefined || sourceMessage.context?.guest !== undefined) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "A guest's message cannot be merged.",
+      });
+    }
+    const mergedAttachments = [...targetMessage.attachments, ...sourceMessage.attachments];
+    if (mergedAttachments.length > PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `A message can have at most ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} attachments.`,
+      });
+    }
+    const upperText = stripAttachmentOnlyBootstrapPrompt(targetMessage.text);
+    const lowerText = stripAttachmentOnlyBootstrapPrompt(sourceMessage.text);
+    const joinedText =
+      upperText.length > 0 && lowerText.length > 0
+        ? `${upperText}\n\n${lowerText}`
+        : upperText.length > 0
+          ? upperText
+          : lowerText;
+    const mergedText = restoreAttachmentOnlyBootstrapPrompt(
+      joinedText,
+      mergedAttachments.length > 0,
+    );
+    yield* ensureGoalCommandSupported(
+      command,
+      { text: mergedText, attachments: mergedAttachments },
+      targetRun.providerInstanceId,
+    );
+    const targetRecords = targetMessage.context?.records ?? [];
+    const sourceRecords = sourceMessage.context?.records ?? [];
+    const mergedRecords = [
+      ...new Map(
+        [...targetRecords, ...sourceRecords].map((record) => [record.contextId, record] as const),
+      ).values(),
+    ];
+    const mergedContext =
+      mergedRecords.length > 0
+        ? { version: 1 as const, records: mergedRecords }
+        : (targetMessage.context ?? sourceMessage.context);
+
+    const now = yield* DateTime.now;
+    const emitEvent = emit(events, command);
+    yield* emitEvent({
+      type: "message.updated",
+      threadId: command.threadId,
+      runId: targetRun.id,
+      ...(targetRun.rootNodeId === null ? {} : { nodeId: targetRun.rootNodeId }),
+      providerInstanceId: targetRun.providerInstanceId,
+      occurredAt: now,
+      payload: withoutGuestAttribution({
+        ...targetMessage,
+        text: mergedText,
+        attachments: mergedAttachments,
+        ...(mergedContext ? { context: mergedContext } : {}),
+        updatedAt: now,
+      }),
+    });
+    const targetTurnItem = projection.turnItems.find(
+      (candidate) => candidate.type === "user_message" && candidate.messageId === targetMessage.id,
+    );
+    if (targetTurnItem !== undefined && targetTurnItem.type === "user_message") {
+      yield* emitEvent({
+        type: "turn-item.updated",
+        threadId: command.threadId,
+        runId: targetRun.id,
+        ...(targetRun.rootNodeId === null ? {} : { nodeId: targetRun.rootNodeId }),
+        providerInstanceId: targetRun.providerInstanceId,
+        occurredAt: now,
+        payload: withoutGuestAttribution({
+          ...targetTurnItem,
+          text: mergedText,
+          attachments: mergedAttachments,
+          ...(mergedContext ? { context: mergedContext } : {}),
+          updatedAt: now,
+        }),
+      });
+    }
+
+    const sourceRootNode =
+      sourceRun.rootNodeId === null
+        ? undefined
+        : projection.nodes.find((candidate) => candidate.id === sourceRun.rootNodeId);
+    const sourceAttempt =
+      sourceRun.activeAttemptId === null
+        ? undefined
+        : projection.attempts.find((candidate) => candidate.id === sourceRun.activeAttemptId);
+    yield* emitEvent({
+      type: "run.updated",
+      threadId: command.threadId,
+      runId: sourceRun.id,
+      ...(sourceRun.rootNodeId === null ? {} : { nodeId: sourceRun.rootNodeId }),
+      providerInstanceId: sourceRun.providerInstanceId,
+      occurredAt: now,
+      payload: {
+        ...sourceRun,
+        status: "cancelled",
+        queuePosition: null,
+        completedAt: now,
+      },
+    });
+    if (sourceAttempt !== undefined && sourceRootNode !== undefined) {
+      yield* emitEvent({
+        type: "run-attempt.updated",
+        threadId: command.threadId,
+        runId: sourceRun.id,
+        nodeId: sourceRootNode.id,
+        providerInstanceId: sourceRun.providerInstanceId,
+        occurredAt: now,
+        payload: {
+          ...sourceAttempt,
+          status: "cancelled",
+          completedAt: now,
+        },
+      });
+    }
+    if (sourceRootNode !== undefined) {
+      yield* emitEvent({
+        type: "node.updated",
+        threadId: command.threadId,
+        runId: sourceRun.id,
+        nodeId: sourceRootNode.id,
+        providerInstanceId: sourceRun.providerInstanceId,
+        occurredAt: now,
+        payload: {
+          ...sourceRootNode,
+          status: "cancelled",
+          completedAt: now,
+        },
+      });
+    }
+
+    const remainingRuns = queuedRuns.filter((run) => run.id !== sourceRun.id);
+    for (const [index, run] of remainingRuns.entries()) {
+      const queuePosition = index + 1;
+      const nextFreshContext =
+        run.id === targetRun.id && sourceRun.freshContext === true ? true : run.freshContext;
+      if (run.queuePosition === queuePosition && run.freshContext === nextFreshContext) {
+        continue;
+      }
+      yield* emitEvent({
+        type: "run.updated",
+        threadId: command.threadId,
+        runId: run.id,
+        ...(run.rootNodeId === null ? {} : { nodeId: run.rootNodeId }),
+        providerInstanceId: run.providerInstanceId,
+        occurredAt: now,
+        payload: {
+          ...run,
+          queuePosition,
+          ...(nextFreshContext === true ? { freshContext: true } : {}),
+        },
+      });
     }
   });
 
@@ -12574,13 +12915,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const failureOwnsQueue = latestExecutedRun(projection.runs)?.id === state.run.id;
     for (const run of projection.runs) {
       if (!failureOwnsQueue || run.status !== "queued" || run.queueHeld !== true) continue;
+      const updatedRun = removeRunHoldReasons(run, ["stop", "failure", "worktree"]);
+      if (runHoldStateEquals(updatedRun, run)) continue;
       yield* emitEvent({
         type: "run.updated",
         threadId: command.threadId,
         runId: run.id,
         providerInstanceId: run.providerInstanceId,
         occurredAt: now,
-        payload: { ...run, queueHeld: false },
+        payload: updatedRun,
       });
     }
   });
@@ -13151,14 +13494,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         );
         continue;
       }
-      if (run.queueHeld === true) continue;
+      const heldRun = addRunHoldReason(run, "stop");
+      if (runHoldStateEquals(heldRun, run)) continue;
       yield* emitEvent({
         type: "run.updated",
         threadId: thread.id,
         runId: run.id,
         providerInstanceId: run.providerInstanceId,
         occurredAt: input.now,
-        payload: { ...run, queueHeld: true },
+        payload: heldRun,
       });
     }
     const pullRequests = thread.pullRequests ?? [];
@@ -15764,6 +16108,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const now = yield* DateTime.now;
         const queued = projection.runs.filter((run) => run.status === "queued");
         for (const run of queued) {
+          const updatedRun =
+            selectedRunId !== undefined && run.id === selectedRunId
+              ? withRunHoldReasons(run, [])
+              : removeRunHoldReasons(run, ["stop", "failure", "worktree"]);
           yield* emit(
             events,
             command,
@@ -15773,7 +16121,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             runId: run.id,
             providerInstanceId: run.providerInstanceId,
             occurredAt: now,
-            payload: { ...run, queueHeld: false },
+            payload: updatedRun,
           });
         }
         if (queued.length === 0) {
@@ -15791,6 +16139,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       case "queued-run.reorder":
         yield* dispatchQueuedRunReorder(command, events);
+        break;
+      case "queued-run.hold":
+        yield* dispatchQueuedRunHold(command, events);
+        break;
+      case "queued-run.merge":
+        yield* dispatchQueuedRunMerge(command, events);
         break;
       case "queued-run.cancel":
         yield* dispatchQueuedRunCancel(command, events);
@@ -15897,7 +16251,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           }),
       ),
     );
-    if (command.type === "queue.resume" || command.type === "queued-run.start") {
+    if (
+      command.type === "queue.resume" ||
+      command.type === "queued-run.start" ||
+      command.type === "queued-run.edit" ||
+      command.type === "queued-run.reorder" ||
+      (command.type === "queued-run.hold" && !command.held)
+    ) {
       yield* mapDispatchError(command)(
         startNextQueuedRun(command.threadId, {
           userStarted: true,
@@ -15983,6 +16343,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           command.type === "thread.interrupt.unresponsive" ||
           command.type === "thread.stop" ||
           command.type === "subagent.stop" ||
+          command.type === "queued-run.hold" ||
           // Closing a share again, or after it ended, is not an error.
           command.type === "thread.guest-share.close" ||
           (command.type === "thread.delete" && command.onlyIfUnused === true),
@@ -16152,6 +16513,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     if (
       command.type === "queue.resume" ||
       command.type === "queued-run.start" ||
+      command.type === "queued-run.edit" ||
+      command.type === "queued-run.reorder" ||
+      (command.type === "queued-run.hold" && !command.held) ||
       (command.type === "thread.runtime-mode.set" && runtimeModeCeiling !== undefined)
     ) {
       yield* mapDispatchError(command)(

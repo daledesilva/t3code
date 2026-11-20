@@ -246,7 +246,7 @@ import { observeResize } from "~/lib/observeResize";
 const isEnvironmentRequestInvalidError = Schema.is(EnvironmentRequestInvalidError);
 import { toastManager } from "../ui/toast";
 import { m as resolveMessage } from "../../i18n/messages";
-import { BuildingIcon, PlayIcon, ReplyIcon } from "lucide-react";
+import { BuildingIcon, PauseIcon, PlayIcon, ReplyIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { assistantCitationLabel } from "@t3tools/shared/assistantCitations";
 import { assistantCitationNavigation } from "../../lib/assistantCitationNavigation";
@@ -452,6 +452,8 @@ export interface ChatComposerProps {
     readonly attachment: ContractChatAttachment;
     readonly url: string | null;
   }> | null;
+  isPausedOnEditingQueuedMessage?: boolean;
+  onCancelQueuedEdit?: () => void;
   onRemoveEditingQueuedAttachment: (attachmentId: string) => void;
 
   onCompactContext: () => void;
@@ -579,6 +581,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onExpandImage,
     onFileOpen,
     editingQueuedAttachments,
+    isPausedOnEditingQueuedMessage = false,
+    onCancelQueuedEdit,
     onRemoveEditingQueuedAttachment,
   } = props;
   const {
@@ -1199,7 +1203,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const isChoiceOnlyPendingQuestion =
     activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
-  const showComposerTopDrawer = pendingUserInputs.length > 0;
+  const showComposerTopDrawer =
+    pendingUserInputs.length > 0 || (!isComposerCollapsedMobile && isEditingQueuedMessage);
   const showCollapsedMobilePromptRow = isComposerCollapsedMobile;
   const showComposerAttachAction =
     fileStagingLimit !== null &&
@@ -3499,6 +3504,44 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onAdvance={onAdvanceActivePendingUserInput}
                     onDismiss={onDismissActivePendingUserInput}
                   />
+                ) : !isComposerCollapsedMobile && isEditingQueuedMessage ? (
+                  <ComposerBanner.Row data-testid="composer-queued-edit-pause-notice">
+                    <ComposerBanner.Icon
+                      className={
+                        isPausedOnEditingQueuedMessage ? "text-success-foreground" : undefined
+                      }
+                    >
+                      <PauseIcon />
+                    </ComposerBanner.Icon>
+                    <ComposerBanner.Content>
+                      <span
+                        className={cn(
+                          "min-w-0 flex-1 truncate",
+                          isPausedOnEditingQueuedMessage ? "text-white" : "text-muted-foreground",
+                        )}
+                      >
+                        {isPausedOnEditingQueuedMessage
+                          ? gt(
+                              "The thread is paused until you save, cancel, or reorder this prompt.",
+                            )
+                          : gt(
+                              "The AI will pause once it reaches this prompt if it is still being edited.",
+                            )}
+                      </span>
+                    </ComposerBanner.Content>
+                    {onCancelQueuedEdit ? (
+                      <ComposerBanner.Actions>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          aria-label={gt("Cancel editing queued message")}
+                          onClick={onCancelQueuedEdit}
+                        >
+                          {gt("Cancel")}
+                        </Button>
+                      </ComposerBanner.Actions>
+                    ) : null}
+                  </ComposerBanner.Row>
                 ) : null}
               </ComposerBanner.Root>
             </ComposerBanner.Attachment>

@@ -24,6 +24,7 @@ const state = vi.hoisted(() => ({
   threadState: null as unknown as Atom.Writable<AsyncResult.AsyncResult<EnvironmentThreadState>>,
   workflow: null as unknown,
   commandResult: undefined as unknown,
+  commands: vi.fn<(value: unknown) => Promise<unknown>>(async () => undefined),
 }));
 
 vi.mock(import("@t3tools/client-runtime/state/thread-workflows"), async (importOriginal) => ({
@@ -74,7 +75,7 @@ vi.mock(import("../../state/threads"), async (importOriginal) => {
 
 vi.mock(import("../../state/use-atom-command"), async (importOriginal) => ({
   ...(await importOriginal()),
-  useAtomCommand: (() => async () => state.commandResult) as never,
+  useAtomCommand: (() => state.commands) as never,
 }));
 
 vi.mock(import("../../assets/assetUrls"), async (importOriginal) => ({
@@ -95,6 +96,8 @@ import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 
 function setup() {
   state.workflow = null;
+  state.commands.mockReset();
+  state.commands.mockImplementation(async () => state.commandResult);
   state.commandResult = undefined;
 }
 
@@ -105,7 +108,6 @@ const baseProps = {
   editingRunId: null,
   editBlockedReason: null,
   onEditQueuedRun: () => undefined,
-  onCancelEdit: () => undefined,
   timestampFormat: "locale",
   onOpenThread: () => undefined,
   onImageExpand: () => undefined,
@@ -238,6 +240,25 @@ it("previews assistant quotes as readable text and preserves the citation when e
   expect(onEditQueuedRun).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({ text: quoteAndText }),
   );
+
+  await expect
+    .element(page.getByRole("button", { name: "Reorder queued message", exact: true }).first())
+    .toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: "Copy message", exact: true }).first())
+    .toBeInTheDocument();
+  await expect
+    .element(page.getByRole("button", { name: "Copy prompt link", exact: true }).first())
+    .toBeInTheDocument();
+  await page.getByRole("button", { name: "Merge", exact: true }).first().click();
+  expect(state.commands).toHaveBeenCalledExactlyOnceWith({
+    environmentId: "environment:test",
+    input: {
+      threadId: "thread:test",
+      targetRunId: "run:quote-only",
+      sourceRunId: "run:quote-and-text",
+    },
+  });
 });
 
 it("shows who sent a queued message and folds automation and agent prompts", async () => {

@@ -9,7 +9,10 @@ import {
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { formatModelSlugName, resolveSelectableModel } from "@t3tools/shared/model";
+import { msg, useMessages } from "gt-react";
 import { memo } from "react";
+
+import { m, type MessageResolver } from "~/i18n/messages";
 
 import { usePrimarySettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
@@ -38,7 +41,10 @@ export function resolveModelTriggerLabel(input: {
   readonly model: string;
   readonly options: ReadonlyArray<ModelEsque>;
   readonly fallbackToFirstOption?: boolean;
+  readonly retainedModel?: ModelEsque | undefined;
+  readonly resolve?: MessageResolver;
 }) {
+  const resolve = input.resolve ?? m;
   const normalizedModel =
     (input.driverKind
       ? resolveSelectableModel(
@@ -58,6 +64,7 @@ export function resolveModelTriggerLabel(input: {
       model: input.model,
       options: input.options,
     }) ??
+    input.retainedModel ??
     (input.fallbackToFirstOption &&
     input.driverKind !== "opencode" &&
     input.driverKind !== "antigravity"
@@ -74,10 +81,12 @@ export function resolveModelTriggerLabel(input: {
   const triggerTitle = effectiveModel
     ? getTriggerDisplayModelName(effectiveModel, input.driverKind)
     : input.model === ANTIGRAVITY_DEFAULT_MODEL
-      ? "Choose model"
-      : input.model || "Choose model";
+      ? resolve(msg("Choose model"))
+      : input.model || resolve(msg("Choose model"));
   const triggerLabel = effectiveModel
-    ? `${getDisplayModelName(effectiveModel)}${effectiveModel.isUnavailable ? " (Unavailable)" : ""}`
+    ? effectiveModel.isUnavailable
+      ? resolve(msg("{model} (Unavailable)", { model: getDisplayModelName(effectiveModel) }))
+      : getDisplayModelName(effectiveModel)
     : triggerTitle;
   return {
     normalizedModel,
@@ -90,6 +99,7 @@ export function resolveModelTriggerLabel(input: {
 export function formatModelSelectionTriggerLabel(
   modelSelection: ModelSelection,
   providers: ReadonlyArray<ServerProvider>,
+  resolve?: MessageResolver,
 ): string {
   const provider = providers.find((entry) => entry.instanceId === modelSelection.instanceId);
   const driverKind = provider?.driver ?? inferDriverKindFromInstanceId(modelSelection.instanceId);
@@ -97,6 +107,7 @@ export function formatModelSelectionTriggerLabel(
     driverKind,
     model: modelSelection.model,
     options: provider?.models ?? [],
+    ...(resolve ? { resolve } : {}),
   }).triggerTitle;
 }
 
@@ -110,6 +121,7 @@ export const TimelineRunModelChip = memo(function TimelineRunModelChip(props: {
   readonly testId?: string | undefined;
 }) {
   const settings = usePrimarySettings();
+  const resolve = useMessages();
   const environmentProviders = useAtomValue(
     serverEnvironment.providersValueAtom(props.environmentId),
   );
@@ -125,6 +137,7 @@ export const TimelineRunModelChip = memo(function TimelineRunModelChip(props: {
     driverKind,
     model: props.modelSelection.model,
     options: models,
+    resolve,
   });
   const showInstanceBadge =
     activeEntry !== null && shouldShowInstanceBadge(activeEntry, instanceEntries);

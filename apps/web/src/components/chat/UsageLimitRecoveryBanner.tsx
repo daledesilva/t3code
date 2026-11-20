@@ -4,6 +4,7 @@ import { m, type MessageResolver } from "~/i18n/messages";
 import {
   type OrchestrationV2LimitRecovery,
   type OrchestrationV2LimitRecoveryUpdate,
+  type ProviderInstanceId,
   type RunId,
 } from "@t3tools/contracts";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
@@ -36,6 +37,33 @@ type RecoveryProps = {
   timestampFormat: TimestampFormat;
   onChange: (recovery: OrchestrationV2LimitRecoveryUpdate) => Promise<void>;
 };
+
+export function exhaustedModelUsageLimitBannerItem(props: {
+  readonly instanceId: ProviderInstanceId;
+  readonly model: string;
+  readonly modelLabel: string;
+  readonly resetAt: string | null;
+  readonly timestampFormat: TimestampFormat;
+  readonly resolve?: MessageResolver;
+}): ComposerBannerStackItem {
+  const { instanceId, model, modelLabel, resetAt, timestampFormat } = props;
+  const resolve = props.resolve ?? m;
+  const resetDescription = resetAt
+    ? resolve(
+        msg("Resets {time}", {
+          time: formatUpcomingTimestamp(resetAt, timestampFormat, undefined, undefined, resolve),
+        }),
+      )
+    : resolve(msg("Reset time unavailable"));
+  return {
+    id: `exhausted-model-usage-limit:${instanceId}:${model}`,
+    variant: "warning",
+    group: "environment",
+    icon: <GaugeIcon />,
+    title: resolve(msg("Usage limit reached")),
+    description: `${modelLabel} · ${resetDescription}`,
+  };
+}
 
 export function usageLimitRecoveryBannerItem(
   props: RecoveryProps,

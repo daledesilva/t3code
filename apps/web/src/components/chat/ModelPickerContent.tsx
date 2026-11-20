@@ -8,7 +8,7 @@ import {
   type ResolvedKeybindingsConfig,
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
 } from "@t3tools/contracts";
-import { resolveSelectableModel } from "@t3tools/shared/model";
+import { getProviderOptionDescriptors, resolveSelectableModel } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import { formatProviderUpdateRequiredNotice } from "@t3tools/client-runtime/providerUpdateRequiredModels";
 import { groupModelsBySubProvider } from "@t3tools/client-runtime/providerSubProviders";
@@ -25,6 +25,9 @@ import {
   type RefObject,
 } from "react";
 import { ChevronRightIcon } from "lucide-react";
+import { useComposerDraftStore } from "../../composerDraftStore";
+import { getProviderModelCapabilities } from "../../providerModels";
+import { resolveModelSpeedMode } from "./ComposerModelEffort";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { useProviderWorkspaceSnapshotRefresh } from "./useProviderWorkspaceSnapshotRefresh";
@@ -79,6 +82,7 @@ type ModelPickerItem = {
   shortName?: string;
   subProvider?: string;
   badge?: "new";
+  speedLabel?: "Standard" | "Fast" | "Ultrafast" | null | undefined;
   instanceId: ProviderInstanceId;
   driverKind: ProviderDriverKind;
   instanceDisplayName: string;
@@ -479,6 +483,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const keybindings = providedKeybindings ?? serverKeybindings;
   const [searchHeight, setSearchHeight] = useState(0);
   const toggleFavorite = useToggleEnvironmentModelFavorite(props.environmentId);
+  const stickyOptionsByModelByProvider = useComposerDraftStore(
+    (store) => store.stickyOptionsByModelByProvider,
+  );
 
   const focusSearchInput = () => {
     searchInputRef.current?.focus({ preventScroll: true });
@@ -597,12 +604,33 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           continue;
         }
         seenKeys.add(key);
+        const savedOptions = stickyOptionsByModelByProvider[instanceId]?.[model.slug];
+        const caps = getProviderModelCapabilities(
+          entry.snapshot.models,
+          model.slug,
+          entry.driverKind,
+        );
+        const descriptors = getProviderOptionDescriptors({
+          caps,
+          selections: savedOptions,
+        });
+        const speedMode = !model.isUnavailable
+          ? resolveModelSpeedMode({
+              descriptors,
+              modelSelection: {
+                instanceId,
+                model: model.slug,
+                ...(savedOptions ? { options: savedOptions } : {}),
+              },
+            })
+          : null;
         out.push({
           slug: model.slug,
           name: model.name,
           ...(model.shortName ? { shortName: model.shortName } : {}),
           ...(model.subProvider ? { subProvider: model.subProvider } : {}),
           ...(model.badge ? { badge: model.badge } : {}),
+          ...(speedMode ? { speedLabel: speedMode.label } : {}),
           ...(model.isLegacy ? { isLegacy: true } : {}),
           ...(model.isUnavailable ? { isUnavailable: true } : {}),
           instanceId,
@@ -876,6 +904,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     modelJumpLabelByKey,
     activeModelKey,
     selectedModelKeySet,
+    stickyOptionsByModelByProvider,
   };
 
   const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -1211,6 +1240,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     favoriteStarOnHover={selectedInstanceId === "favorites" && !isSearching}
                     showInstanceBadge={badgedInstanceIds.has(model.instanceId)}
                     showNewBadge={model.badge === "new"}
+                    speedLabel={model.speedLabel}
                     unavailable={model.isUnavailable === true}
                     jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                     disabledReason={disabledReason}

@@ -2,6 +2,7 @@ import type { ChatComposerProps } from "./ChatComposer";
 import type { PromptUltrathink } from "./TraitsPicker";
 import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
 import { type AppModelOption } from "../../modelSelection";
+import { T, useGT, useMessages } from "gt-react";
 import { CircleAlertIcon, PinIcon } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -23,7 +24,6 @@ import {
   type ModelSelection,
   type ProviderDriverKind,
   type ProviderInstanceId,
-  type ProviderInteractionMode,
   type RuntimeMode,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -31,6 +31,7 @@ import type { EffortDisplay, ModelPin } from "@t3tools/contracts/settings";
 import {
   buildExplicitProviderOptionSelectionsFromDescriptors,
   getProviderOptionDescriptors,
+  withImplicitFastModeDefault,
 } from "@t3tools/shared/model";
 import { modelPinsEqual } from "@t3tools/shared/serverSettings";
 import {
@@ -44,7 +45,9 @@ import { cn } from "~/lib/utils";
 import { readLocalApi } from "../../localApi";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
-import { resolveComposerTraitsInput, withImplicitFastModeDefault } from "./composerProviderState";
+import { resolveComposerTraitsInput } from "./composerProviderState";
+import { useApplyThreadModelPick } from "./useApplyThreadModelPick";
+import { useStableCallback } from "../../hooks/useStableCallback";
 import {
   ComposerEffortColumn,
   ComposerPickerFooter,
@@ -60,11 +63,11 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 type PinnedModelContextMenuAction = "rename" | "unpin";
 
-const PINNED_MODEL_CONTEXT_MENU_ITEMS: ReadonlyArray<
-  ContextMenuItem<PinnedModelContextMenuAction>
-> = [
-  { id: "rename", label: "Rename", icon: "pencil" },
-  { id: "unpin", label: "Unpin", icon: "pin-off" },
+const buildPinnedModelContextMenuItems = (
+  gt: ReturnType<typeof useGT>,
+): ReadonlyArray<ContextMenuItem<PinnedModelContextMenuAction>> => [
+  { id: "rename", label: gt("Rename"), icon: "pencil" },
+  { id: "unpin", label: gt("Unpin"), icon: "pin-off" },
 ];
 
 // Mounted only while renaming, so each rename starts uncommitted.
@@ -74,6 +77,7 @@ function PinnedModelRenameInput(props: {
   onCommit: (nextLabel: string) => void;
   onCancel: () => void;
 }) {
+  const gt = useGT();
   const settledRef = useRef(false);
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     event.stopPropagation();
@@ -92,7 +96,7 @@ function PinnedModelRenameInput(props: {
     <input
       autoFocus
       dir="auto"
-      aria-label="Pinned model nickname"
+      aria-label={gt("Pinned model nickname")}
       defaultValue={props.initialValue}
       placeholder={props.placeholder}
       ref={(element) => {
@@ -116,7 +120,6 @@ const PINNED_MODEL_SUBMIT_PILL =
 
 export function ComposerPinnedModelsRow(props: {
   environmentId: EnvironmentId;
-  planModeEnabled: boolean;
   showProviderUnavailable: boolean;
   providerCatalogPending: boolean;
   isSendBusy: boolean;
@@ -141,7 +144,6 @@ export function ComposerPinnedModelsRow(props: {
 }) {
   const {
     environmentId,
-    planModeEnabled,
     showProviderUnavailable,
     providerCatalogPending,
     isSendBusy,
@@ -156,6 +158,7 @@ export function ComposerPinnedModelsRow(props: {
     inline = false,
     trailingAccessory,
   } = props;
+  const gt = useGT();
   const { pins } = useEnvironmentModelPreferences(environmentId);
   const togglePin = useToggleEnvironmentModelPin(environmentId);
   const renamePin = useRenameEnvironmentModelPin(environmentId);
@@ -175,7 +178,7 @@ export function ComposerPinnedModelsRow(props: {
     void (async () => {
       const api = readLocalApi();
       if (!api) return;
-      const action = await api.contextMenu.show(PINNED_MODEL_CONTEXT_MENU_ITEMS, position);
+      const action = await api.contextMenu.show(buildPinnedModelContextMenuItems(gt), position);
       if (action === "rename") {
         setRenamingPinKey(pinKey);
       } else if (action === "unpin") {
@@ -215,7 +218,6 @@ export function ComposerPinnedModelsRow(props: {
       entry.snapshot.models,
       resolvedSlug,
       entry.driverKind,
-      planModeEnabled,
     );
     const pinSelections = withImplicitFastModeDefault(pinCaps, pin.options);
     const pinTraitsInput = {
@@ -225,7 +227,6 @@ export function ComposerPinnedModelsRow(props: {
       models: entry.snapshot.models,
       modelOptions: pinSelections,
       promptUltrathink: "none" as const,
-      planModeEnabled,
       onModelOptionsChange: () => {},
     };
     const pinEffort = describePinnedModelEffort(pinTraitsInput, "sm");
@@ -346,7 +347,7 @@ export function ComposerPinnedModelsRow(props: {
         key={pinKey}
         type="button"
         aria-disabled={!isActionReady || undefined}
-        aria-label={`Submit with ${submitTargetLabel}`}
+        aria-label={gt("Submit with {model}", { model: submitTargetLabel })}
         data-chat-model-pin="true"
         disabled={isHardDisabled}
         onClick={(event) => {
@@ -393,7 +394,7 @@ export function ComposerPinnedModelsRow(props: {
         <TooltipTrigger render={button} />
         <TooltipPopup side="top">
           <span className="inline-flex flex-wrap items-center gap-1">
-            <span>Submit with</span>
+            <T>Submit with</T>
             {tooltipIconElement}
             <span>{tooltipSuffix}</span>
           </span>
@@ -471,6 +472,7 @@ const PINNED_MODEL_STATES = "aria-pressed:bg-accent aria-pressed:text-foreground
 
 export function ComposerControlsBar(props: {
   environmentId: EnvironmentId;
+  workspaceCwd: string | null;
   routeKind: ChatComposerProps["routeKind"];
   routeThreadRef: ChatComposerProps["routeThreadRef"];
   draftId: ChatComposerProps["draftId"];
@@ -482,16 +484,12 @@ export function ComposerControlsBar(props: {
   reportedModelSelection: ChatComposerProps["reportedModelSelection"];
   promptUltrathink: PromptUltrathink;
   onPromptEdit: (edit: (prompt: string) => string) => void;
-  planModeEnabled: boolean;
-  planModeUiEnabled: boolean;
   effortDisplay: EffortDisplay;
   /** The strip under a new thread names the permissions, so the row does not repeat them. */
   permissionsShownInStrip: boolean;
-  interactionMode: ProviderInteractionMode;
   compatibleRuntimeMode: RuntimeMode;
   defaultRuntimeMode: RuntimeMode | undefined;
   compatibleRuntimeModeOptions: ReadonlyArray<RuntimeModeOption>;
-  toggleInteractionMode: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   composerControlsCollapsed: boolean;
   composerControlsHidden: boolean;
@@ -534,13 +532,9 @@ export function ComposerControlsBar(props: {
     reportedModelSelection,
     promptUltrathink,
     onPromptEdit,
-    planModeEnabled,
-    planModeUiEnabled,
-    interactionMode,
     compatibleRuntimeMode,
     defaultRuntimeMode,
     compatibleRuntimeModeOptions,
-    toggleInteractionMode,
     handleRuntimeModeChange,
     composerControlsCollapsed,
     composerControlsHidden,
@@ -582,15 +576,20 @@ export function ComposerControlsBar(props: {
     pickerOwnsModeShortcut,
   } = resolveComposerControlsOwnership({
     matchesDefault: accessMatchesDefault || props.permissionsShownInStrip,
-    planModeUiEnabled,
     collapsed: composerControlsCollapsed,
     measuredHiddenBlockCount,
   });
   const controlSize = composerControlsCollapsed ? "xs" : "sm";
+  const gt = useGT();
+  const m = useMessages();
+  const applyThreadModelPick = useApplyThreadModelPick();
+  const applyRouteThreadModelPick = useStableCallback(() => applyThreadModelPick(routeThreadRef));
   const traitsInput = resolveComposerTraitsInput({
     provider: selectedProvider,
     instanceId: selectedInstanceId,
-    ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
+    ...(routeKind === "server"
+      ? { threadRef: routeThreadRef, onDraftModelOptionsChange: applyRouteThreadModelPick }
+      : {}),
     ...(routeKind === "draft" && draftId ? { draftId } : {}),
     model: selectedModel,
     models: selectedProviderModels,
@@ -598,20 +597,14 @@ export function ComposerControlsBar(props: {
     reportedModelSelection,
     promptUltrathink,
     onPromptEdit,
-    planModeEnabled,
   });
-  const effort = describeComposerEffort(traitsInput, props.effortDisplay, controlSize);
+  const effort = describeComposerEffort(traitsInput, props.effortDisplay, controlSize, m);
   const instanceIndicatorBackground = composerControlsCollapsed
     ? "color-mix(in srgb, var(--chat-composer-glass-surface) var(--glass-opacity), transparent)"
     : "var(--contrast-input)";
   const activeDescriptors = traitsInput
     ? getProviderOptionDescriptors({
-        caps: getProviderModelCapabilities(
-          selectedProviderModels,
-          selectedModel,
-          selectedProvider,
-          planModeEnabled,
-        ),
+        caps: getProviderModelCapabilities(selectedProviderModels, selectedModel, selectedProvider),
         selections: traitsInput.modelOptions,
       })
     : [];
@@ -640,15 +633,12 @@ export function ComposerControlsBar(props: {
           id: "mode",
           content: (
             <ComposerFooterModeControls
-              showInteractionModeToggle={planModeUiEnabled}
-              interactionMode={interactionMode}
               runtimeMode={compatibleRuntimeMode}
               runtimeModeOptions={compatibleRuntimeModeOptions}
               size={controlSize}
               hidden={composerControlsHidden || restingHiddenBlockCount > 0}
               accessDisplay={accessDisplay}
               emphasized={!accessMatchesDefault}
-              onToggleInteractionMode={toggleInteractionMode}
               onRuntimeModeChange={handleRuntimeModeChange}
             />
           ),
@@ -656,12 +646,13 @@ export function ComposerControlsBar(props: {
       ]
     : [];
   const pinTriggerDisabled = providerCatalogPending || isSendBusy || currentPinCandidate === null;
-  const pinTooltipLabel = isCurrentModelPinned ? "Unpin model" : "Pin model";
+  const pinTooltipLabel = isCurrentModelPinned ? gt("Unpin model") : gt("Pin model");
   // Its own element, so typing (which rebuilds the controls around it) leaves it cached.
   const composerModelPicker = (
     <div data-chat-provider-model-segmented="true" className="flex min-w-0 shrink items-center">
       <ComposerModelPicker
         environmentId={environmentId}
+        workspaceCwd={props.workspaceCwd}
         compact={false}
         isComposerOwned
         // The trigger grows away from this edge when its model or effort label changes.
@@ -770,7 +761,7 @@ export function ComposerControlsBar(props: {
       className="shrink-0"
     >
       <CircleAlertIcon className="size-4" />
-      {providerSetupInstanceId ? "Open provider settings" : "No provider available"}
+      {providerSetupInstanceId ? gt("Open provider settings") : gt("No provider available")}
     </ComposerControl>
   ) : (
     <>
@@ -809,15 +800,12 @@ export function ComposerControlsBar(props: {
           )}
         >
           <CompactComposerControlsMenu
-            interactionMode={interactionMode}
             runtimeMode={compatibleRuntimeMode}
             runtimeModeOptions={compatibleRuntimeModeOptions}
             size={controlSize}
             hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
-            showInteractionModeToggle={planModeUiEnabled && hiddenRestingBlockIds.length > 0}
             // Permissions join the overflow only when their normal home is in it.
             showPermissions={overflowShowsPermissions}
-            onToggleInteractionMode={toggleInteractionMode}
             onRuntimeModeChange={handleRuntimeModeChange}
           />
         </div>

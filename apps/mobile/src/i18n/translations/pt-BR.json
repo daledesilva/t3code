@@ -1625,6 +1625,7 @@
   "5521de0732509b7c": "Fazendo pull das alterações mais recentes",
   "adb9c574404d1db8": "Já está atualizado",
   "84964b49287ced17": "Pull mais recente feito em {branch}",
+  "15b815a63cf39441": "Não foi possível enfileirar a resposta",
   "439fbd498ad5aba1": "Os anexos não estão prontos",
   "f928da494821aeb0": "Aguarde os envios terminarem ou tente novamente os que falharam.",
   "4c7966190fc234b4": "Itens de contexto demais",
@@ -4326,7 +4327,7 @@
     " · Roda por conta própria"
   ],
   "6f2479ee100ebe84": "Anexos demais.",
-  "01ae9b8989442ac6": "Ou digite uma resposta personalizada",
+  "78344b60f407928e": "Outros",
   "802a10810a7f044e": "Abrir {host}",
   "9fac16daf3b3ab10": "Valor",
   "9605dc349bd2c872": "Referência de {label} em {source}",

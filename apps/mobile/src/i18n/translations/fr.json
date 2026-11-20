@@ -1625,6 +1625,7 @@
   "5521de0732509b7c": "Récupération des dernières modifications",
   "adb9c574404d1db8": "Déjà à jour",
   "84964b49287ced17": "Dernières modifications récupérées sur {branch}",
+  "15b815a63cf39441": "Impossible de mettre la réponse en file d’attente",
   "439fbd498ad5aba1": "Les pièces jointes ne sont pas prêtes",
   "f928da494821aeb0": "Attendez la fin des envois, ou relancez les envois échoués.",
   "4c7966190fc234b4": "Trop d’éléments de contexte",
@@ -4326,7 +4327,7 @@
     " · Travaille seul"
   ],
   "6f2479ee100ebe84": "Trop de pièces jointes.",
-  "01ae9b8989442ac6": "Ou saisissez une réponse personnalisée",
+  "78344b60f407928e": "Autre",
   "802a10810a7f044e": "Ouvrir {host}",
   "9fac16daf3b3ab10": "Valeur",
   "9605dc349bd2c872": "Référence de {label} dans {source}",

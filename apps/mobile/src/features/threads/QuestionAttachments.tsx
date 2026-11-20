@@ -129,7 +129,7 @@ export function QuestionAttachments(props: {
       )
       .finally(preparation.finish);
   });
-  if (!selectedThread || props.question.allowCustomAnswer === false) return null;
+  if (!selectedThread) return null;
   const { environmentId, id: threadId } = selectedThread;
   const capabilities = configs.get(environmentId)?.environment.capabilities;
   const canAttach = capabilities !== undefined;
@@ -196,8 +196,8 @@ export function QuestionAttachments(props: {
         <TextInput
           ref={inputRef}
           defaultValue={initialText}
-          multiline={props.question.initialAnswer !== undefined}
-          submitBehavior={props.question.initialAnswer !== undefined ? "newline" : undefined}
+          multiline
+          submitBehavior="newline"
           editable={!props.disabled}
           onChangeText={(text) => {
             nativeText.current = text;
@@ -211,7 +211,7 @@ export function QuestionAttachments(props: {
             focusedRef.current = false;
             onInputFocusChange?.(false);
           }}
-          placeholder={gt("Or type a custom answer")}
+          placeholder={gt("Other")}
           className="min-h-[54px] rounded-2xl border border-input-border bg-input px-3.5 py-3 font-sans text-base text-foreground"
         />
       </TextInputWrapper>

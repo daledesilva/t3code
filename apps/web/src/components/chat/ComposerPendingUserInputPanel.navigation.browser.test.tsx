@@ -7,7 +7,7 @@ import {
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import { makeThreadRequestsResolvedAnnouncer } from "@t3tools/client-runtime/state/thread-requests";
-import { useLayoutEffect, useRef, type ComponentProps } from "react";
+import { useLayoutEffect, type ComponentProps } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
@@ -17,9 +17,7 @@ vi.mock(import("../ChatMarkdown"), async (importOriginal) => ({
 }));
 
 import { act, fakeTimers, render } from "../../../test/render";
-import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import { makeThreadProjectionFixture } from "../../test-fixtures";
-import { toastManager } from "../ui/toast";
 import { usePendingThreadRequests, usePendingUserInputDraft } from "./usePendingThreadRequests";
 
 const threadRef = { environmentId: EnvironmentId.make("env"), threadId: ThreadId.make("thread") };
@@ -80,22 +78,14 @@ interface ProbeProps {
   environmentId: EnvironmentId;
   projection: OrchestrationV2ThreadProjection;
   loading?: boolean;
-  draftTarget?: DraftId;
 }
 
-function useProbeRequests({ environmentId, projection, loading = false, draftTarget }: ProbeProps) {
-  const promptRef = useRef("");
-  const composerRef = useRef(null);
+function useProbeRequests({ environmentId, projection, loading = false }: ProbeProps) {
   const requests = usePendingThreadRequests({
     environmentId,
     activeThreadId: projection.thread.id,
     serverProjection: loading ? null : projection,
     supportsQuestionAttachments: false,
-    composerDraftTarget: draftTarget ?? { environmentId, threadId: projection.thread.id },
-    setComposerDraftPrompt: (target, prompt) =>
-      useComposerDraftStore.getState().setPrompt(target, prompt),
-    promptRef,
-    composerRef,
     setThreadError: () => {},
   });
   const draft = usePendingUserInputDraft({
@@ -152,64 +142,30 @@ it("retains answers, selections and question position after leaving chat, includ
   expect(requests).toMatchObject(expected);
 });
 
-it("tells the user when an option click moves their typed answer into the hidden composer draft", async () => {
+it("keeps typed Other text when an offered option is selected", async () => {
   using _timers = fakeTimers();
   const environmentId = EnvironmentId.make("displaced-environment");
-  const draftTarget = { environmentId, threadId: threadRef.threadId };
-  const draftPrompt = () => useComposerDraftStore.getState().getComposerDraft(draftTarget)?.prompt;
-  using toast = vi.spyOn(toastManager, "add");
-  const probe = (threadId: ThreadId) => (
-    <PendingRequestsProbe environmentId={environmentId} projection={questionProjection(threadId)} />
-  );
-  await using screen = await render(probe(threadRef.threadId));
-
-  await act(() => requests.onSelectActivePendingUserInputOption("question-0", "Incremental"));
-  expect(toast).not.toHaveBeenCalled();
-
-  await act(() => requests.onChangeActivePendingUserInputCustomAnswer("question-0", "first try"));
-  await act(() => requests.onSelectActivePendingUserInputOption("question-0", "Incremental"));
-  expect(draftPrompt()).toBe("first try");
-  expect(toast).toHaveBeenCalledTimes(1);
-  expect(toast).toHaveBeenCalledWith(
-    expect.objectContaining({
-      type: "info",
-      title: "Your typed text was set aside",
-      description: "It will be back in the composer once the question is answered.",
-      data: { threadRef: draftTarget },
-    }),
-  );
-
-  await act(() => requests.onChangeActivePendingUserInputCustomAnswer("question-0", "second try"));
-  expect(draftPrompt()).toBe("first try");
-  expect(requests.activePendingDraftAnswers["question-0"]).toMatchObject({
-    customAnswer: "second try",
-  });
-  expect(toast).toHaveBeenCalledTimes(1);
-
-  // The hook outlives a thread switch; text set aside in another thread is in another draft.
-  await screen.rerender(probe(ThreadId.make("other-thread")));
-  await act(() => requests.onChangeActivePendingUserInputCustomAnswer("question-0", "elsewhere"));
-  await act(() => requests.onSelectActivePendingUserInputOption("question-0", "Incremental"));
-  await screen.rerender(probe(threadRef.threadId));
-
-  // regression: #35205 undo puts the set-aside text back, so the draft must not keep a copy to resend
-  await act(() => requests.onChangeActivePendingUserInputCustomAnswer("question-0", "first try"));
-  expect(draftPrompt() ?? "").toBe("");
-
-  // Text set aside into a queued-message edit draft never withdraws from the thread draft.
-  await screen.rerender(
+  await using _screen = await render(
     <PendingRequestsProbe
       environmentId={environmentId}
       projection={questionProjection(threadRef.threadId)}
-      draftTarget={DraftId.make("queued-edit")}
     />,
   );
-  await act(() => requests.onChangeActivePendingUserInputCustomAnswer("question-0", "foo"));
+
   await act(() => requests.onSelectActivePendingUserInputOption("question-0", "Incremental"));
-  await screen.rerender(probe(threadRef.threadId));
-  useComposerDraftStore.getState().setPrompt(draftTarget, "foo");
-  await act(() => requests.onChangeActivePendingUserInputCustomAnswer("question-0", "foo"));
-  expect(draftPrompt()).toBe("foo");
+  await act(() => requests.onChangeActivePendingUserInputCustomAnswer("question-0", "first try"));
+  await act(() => requests.onSelectActivePendingUserInputOption("question-0", "Incremental"));
+  expect(requests.activePendingDraftAnswers["question-0"]).toMatchObject({
+    customAnswer: "",
+    retainedCustomAnswer: "first try",
+    selectedOptionValues: ["Incremental"],
+  });
+
+  await act(() => requests.onChangeActivePendingUserInputCustomAnswer("question-0", "second try"));
+  expect(requests.activePendingDraftAnswers["question-0"]).toMatchObject({
+    customAnswer: "second try",
+    retainedCustomAnswer: "second try",
+  });
 });
 
 function QuestionPositionProbe(props: ProbeProps) {

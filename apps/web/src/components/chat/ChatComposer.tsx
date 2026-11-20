@@ -3521,7 +3521,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         )}
                       >
                         {isPausedOnEditingQueuedMessage
-                          ? gt("The thread is paused until you save, cancel, or reorder this prompt.")
+                          ? gt(
+                              "The thread is paused until you save, cancel, or reorder this prompt.",
+                            )
                           : gt(
                               "The AI will pause once it reaches this prompt if it is still being edited.",
                             )}

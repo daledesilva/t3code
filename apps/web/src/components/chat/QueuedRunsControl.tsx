@@ -42,10 +42,10 @@ import {
   ChevronDownIcon,
   Clock3Icon,
   MessagesSquareIcon,
+  LinkIcon,
   PencilIcon,
   XIcon,
 } from "lucide-react";
-import { Link as LinkIconNode } from "lucide";
 import * as DateTime from "effect/DateTime";
 import { msg, T, useGT, useMessages } from "gt-react";
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
@@ -336,11 +336,7 @@ export function QueuedRunsControl({
               const previewText = isAttachmentOnlyBootstrapPrompt(item.text)
                 ? ""
                 : assistantCitationsToPlainText(
-                    replaceComposerContextReferences(item.text, (reference) =>
-                      reference.kind === "image" && item.thumbnails.length > 0
-                        ? ""
-                        : reference.label,
-                    ),
+                    replaceComposerContextReferences(item.text, (reference) => reference.label),
                   ).trim();
               const isEditing = item.runId !== null && item.runId === props.editingRunId;
               const nextItem = visibleItems[position + 1];
@@ -452,8 +448,8 @@ export function QueuedRunsControl({
                     </Button>
                   </TooltipTrigger>
                   <TooltipPopup>
-                  <T>Merge with next queued message</T>
-                </TooltipPopup>
+                    <T>Merge with next queued message</T>
+                  </TooltipPopup>
                 </Tooltip>
               ) : null;
               return (
@@ -774,7 +770,10 @@ function QueuedMessage(props: {
                             className="size-full object-cover"
                           />
                         ) : (
-                          <span aria-label={thumbnail.name} className="block size-full bg-muted/60" />
+                          <span
+                            aria-label={thumbnail.name}
+                            className="block size-full bg-muted/60"
+                          />
                         )}
                       </button>
                     ))}
@@ -787,7 +786,6 @@ function QueuedMessage(props: {
                     {props.onEdit ? (
                       <Tooltip>
                         <TooltipTrigger
-                          nativeButton={false}
                           render={
                             <span className="ms-3 inline-block translate-y-px align-baseline leading-none text-muted-foreground" />
                           }
@@ -839,10 +837,13 @@ function QueuedMessage(props: {
                   {attribution === "agent" &&
                   senderRef &&
                   // Only an environment this client is connected to can open the sender's thread there.
-                  (props.message?.linkedSender === undefined || linkedSenderEnvironment !== null) ? (
+                  (props.message?.linkedSender === undefined ||
+                    linkedSenderEnvironment !== null) ? (
                     <InlineButton
                       tone="muted"
-                      onClick={() => props.onOpenThread(senderRef.threadId, senderRef.environmentId)}
+                      onClick={() =>
+                        props.onOpenThread(senderRef.threadId, senderRef.environmentId)
+                      }
                     >
                       <T>Open thread</T>
                     </InlineButton>
@@ -874,7 +875,7 @@ function QueuedMessage(props: {
                     <MessageCopyButton
                       text={promptLink}
                       label={gt("Copy prompt link")}
-                      icon={LinkIconNode}
+                      icon={LinkIcon}
                       variant="ghost"
                     />
                   ) : null}

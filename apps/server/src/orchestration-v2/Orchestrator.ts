@@ -16112,23 +16112,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             selectedRunId !== undefined && run.id === selectedRunId
               ? withRunHoldReasons(run, [])
               : removeRunHoldReasons(run, ["stop", "failure", "worktree"]);
-          if (
-            selectedRunId !== undefined ||
-            !runHoldStateEquals(updatedRun, run) ||
-            run.queueHeld !== false
-          ) {
-            yield* emit(
-              events,
-              command,
-            )({
-              type: "run.updated",
-              threadId: command.threadId,
-              runId: run.id,
-              providerInstanceId: run.providerInstanceId,
-              occurredAt: now,
-              payload: updatedRun,
-            });
-          }
+          yield* emit(
+            events,
+            command,
+          )({
+            type: "run.updated",
+            threadId: command.threadId,
+            runId: run.id,
+            providerInstanceId: run.providerInstanceId,
+            occurredAt: now,
+            payload: updatedRun,
+          });
         }
         if (queued.length === 0) {
           yield* emit(

@@ -24,7 +24,7 @@ const state = vi.hoisted(() => ({
   threadState: null as unknown as Atom.Writable<AsyncResult.AsyncResult<EnvironmentThreadState>>,
   workflow: null as unknown,
   commandResult: undefined as unknown,
-  commands: vi.fn<(value: unknown) => Promise<unknown>>(async () => state.commandResult),
+  commands: vi.fn<(value: unknown) => Promise<unknown>>(async () => undefined),
 }));
 
 vi.mock(import("@t3tools/client-runtime/state/thread-workflows"), async (importOriginal) => ({
@@ -96,7 +96,8 @@ import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 
 function setup() {
   state.workflow = null;
-  state.commands.mockClear();
+  state.commands.mockReset();
+  state.commands.mockImplementation(async () => state.commandResult);
   state.commandResult = undefined;
 }
 
@@ -249,7 +250,7 @@ it("previews assistant quotes as readable text and preserves the citation when e
   await expect
     .element(page.getByRole("button", { name: "Copy prompt link", exact: true }).first())
     .toBeInTheDocument();
-  await page.getByRole("button", { name: "Merge", exact: true }).click();
+  await page.getByRole("button", { name: "Merge", exact: true }).first().click();
   expect(state.commands).toHaveBeenCalledExactlyOnceWith({
     environmentId: "environment:test",
     input: {

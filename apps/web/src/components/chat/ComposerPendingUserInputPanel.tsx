@@ -1,5 +1,6 @@
 import { type RuntimeRequestId, type ScopedThreadRef } from "@t3tools/contracts";
 import { markdownProseDirection, textDirection } from "~/textDirection";
+import { useGT } from "gt-react";
 import { memo, use, useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
 import { BackgroundThreadContext } from "./backgroundThread";
 import { useStableCallback } from "~/hooks/useStableCallback";
@@ -100,6 +101,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   onDismiss: (requestId: RuntimeRequestId) => void;
   submitOnKeyDown?: ((event: KeyboardEvent) => boolean) | undefined;
 }) {
+  const gt = useGT();
   // Message-mode requests remain answerable after their provider turn ends.
   const canRespond = prompt.responseCapability !== "not_resumable";
   const responseDisabled = disabled || isResponding || !canRespond;
@@ -169,7 +171,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   useEffect(() => {
     if (!activeQuestion || responseDisabled || isCollapsed || backgroundThread) return;
     const handler = (event: globalThis.KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
       if (isInSideChatPane(target)) return;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
@@ -177,14 +179,19 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       }
       if (
         target instanceof HTMLElement &&
-        target.closest('[contenteditable]:not([contenteditable="false"])')
+        target.closest(
+          'select, [contenteditable]:not([contenteditable="false"]), [role="dialog"], [aria-modal="true"], [role="menu"], [role="combobox"], [data-slot$="popup"]',
+        )
       ) {
         return;
       }
       const digit = Number.parseInt(event.key, 10);
       if (Number.isNaN(digit) || digit < 1 || digit > 9) return;
       const optionIndex = digit - 1;
-      if (optionIndex === activeQuestion.options.length) {
+      if (
+        optionIndex === activeQuestion.options.length &&
+        activeQuestion.allowCustomAnswer !== false
+      ) {
         event.preventDefault();
         otherInputRef.current?.focus();
         return;
@@ -225,10 +232,12 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       <CollapsibleTrigger
         render={<ComposerBanner.Row render={<button type="button" />} />}
         title={
-          isCollapsed ? "Show the question and its options" : "Hide the question and its options"
+          isCollapsed
+            ? gt("Show the question and its options")
+            : gt("Hide the question and its options")
         }
         data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
-        className="px-4 pt-1.5"
+        className="px-4 py-1.5"
       >
         <ComposerBanner.Content>
           <span
@@ -259,8 +268,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           {prompt.dismissible ? (
             <ComposerBanner.Dismiss
               render={<span role="button" tabIndex={0} />}
-              aria-label="Dismiss question without answering"
-              title="Dismiss question without answering"
+              aria-label={gt("Dismiss question without answering")}
+              title={gt("Dismiss question without answering")}
               disabled={isResponding}
               data-pending-user-input-dismiss
               onClick={(event) => {
@@ -285,7 +294,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               text={activeQuestion.question}
               cwd={cwd}
               threadRef={threadRef}
-              className={cn("pt-2 text-foreground/85", questionTextAlign)}
+              lineBreaks
+              className={cn("pt-0.5 text-foreground/85", questionTextAlign)}
             />
             {/* Rows span the header row's width so the radios align with the question text and the shortcut column sits under the dismiss button. */}
             <div className="-ms-2 mt-1.5 sm:-ms-1.5">
@@ -308,7 +318,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   <>
                     <span className="pointer-events-none flex h-5 shrink-0 items-center">
                       {activeQuestion.multiSelect ? (
-                        <CheckboxMark checked={isSelected} />
+                        <CheckboxMark checked={isSelected} variant="contrast" />
                       ) : (
                         <OptionRadio checked={isSelected} />
                       )}
@@ -333,34 +343,47 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                     ) : null}
                   </>
                 );
+                // The preview sits outside the button: it can hold links, and a click on a single-select option advances.
                 return (
-                  <button
-                    key={`${activeQuestion.id}:${optionValue}`}
-                    type="button"
-                    aria-pressed={isSelected}
-                    disabled={disabled || isResponding}
-                    onClick={() => {
-                      handleOptionSelection(activeQuestion.id, optionValue);
-                    }}
-                    className={className}
-                  >
-                    {content}
-                  </button>
+                  <div key={`${activeQuestion.id}:${optionValue}`}>
+                    <button
+                      type="button"
+                      aria-pressed={isSelected}
+                      disabled={disabled || isResponding}
+                      onClick={() => {
+                        handleOptionSelection(activeQuestion.id, optionValue);
+                      }}
+                      className={className}
+                    >
+                      {content}
+                    </button>
+                    {option.preview ? (
+                      <ChatMarkdown
+                        text={option.preview}
+                        cwd={cwd}
+                        threadRef={threadRef}
+                        lineBreaks
+                        className="ps-9 pe-2 pb-1.5 text-xs text-foreground/70 sm:ps-8"
+                      />
+                    ) : null}
+                  </div>
                 );
               })}
-              <OtherAnswerField
-                questionId={activeQuestion.id}
-                value={progress.customAnswer}
-                selected={customAnswerActive}
-                disabled={disabled || isResponding}
-                shortcut={
-                  activeQuestion.options.length < 9 ? activeQuestion.options.length + 1 : null
-                }
-                inputRef={otherInputRef}
-                submitOnKeyDown={submitOnKeyDown}
-                onChange={(value) => onChangeCustomAnswer?.(activeQuestion.id, value)}
-                onSubmit={advance}
-              />
+              {activeQuestion.allowCustomAnswer !== false ? (
+                <OtherAnswerField
+                  questionId={activeQuestion.id}
+                  value={progress.customAnswer}
+                  selected={customAnswerActive}
+                  disabled={disabled || isResponding}
+                  shortcut={
+                    activeQuestion.options.length < 9 ? activeQuestion.options.length + 1 : null
+                  }
+                  inputRef={otherInputRef}
+                  submitOnKeyDown={submitOnKeyDown}
+                  onChange={(value) => onChangeCustomAnswer?.(activeQuestion.id, value)}
+                  onSubmit={advance}
+                />
+              ) : null}
             </div>
             <div className="mt-2 flex items-center justify-end gap-2 pe-1 pb-1">
               {questionIndex > 0 ? (
@@ -371,7 +394,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   disabled={isResponding}
                   onClick={onPrevious}
                 >
-                  Previous
+                  {gt("Previous")}
                 </Button>
               ) : null}
               <Button
@@ -384,12 +407,12 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 onClick={advance}
               >
                 {isResponding
-                  ? "Submitting..."
+                  ? gt("Submitting...")
                   : progress.isLastQuestion
                     ? questionIndex > 0
-                      ? "Submit answers"
-                      : "Submit answer"
-                    : "Next question"}
+                      ? gt("Submit answers")
+                      : gt("Submit answer")
+                    : gt("Next question")}
               </Button>
             </div>
           </ComposerBanner.Body>
@@ -420,6 +443,7 @@ function OtherAnswerField({
   onChange: (value: string) => void;
   onSubmit: () => void;
 }) {
+  const gt = useGT();
   return (
     <div
       className={cn(
@@ -442,8 +466,8 @@ function OtherAnswerField({
         value={value}
         disabled={disabled}
         rows={1}
-        placeholder="Other"
-        aria-label="Other"
+        placeholder={gt("Other")}
+        aria-label={gt("Other")}
         className="max-h-40 min-h-8 min-w-0 flex-1 resize-none rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-placeholder focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/30 disabled:cursor-not-allowed"
         onFocus={() => {
           if (!selected && value.trim().length > 0) onChange(value);
@@ -484,7 +508,7 @@ function OptionRadio({ checked }: { checked: boolean }) {
     <span
       aria-hidden
       className={cn(
-        "relative inline-flex size-4.5 shrink-0 items-center justify-center rounded-full border border-input bg-background not-dark:bg-clip-padding sm:size-4 dark:bg-input/32",
+        "relative inline-flex size-4.5 shrink-0 items-center justify-center rounded-full border border-foreground/55 bg-background not-dark:bg-clip-padding sm:size-4 dark:bg-input/32",
         checked ? "shadow-none" : "shadow-xs/5",
       )}
     >

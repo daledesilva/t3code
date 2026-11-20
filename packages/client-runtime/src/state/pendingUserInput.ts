@@ -5,6 +5,7 @@ export interface PendingUserInputQuestion {
   readonly multiSelect?: boolean | undefined;
   readonly allowCustomAnswer?: boolean | undefined;
   readonly initialAnswer?: string | undefined;
+  readonly required?: boolean | undefined;
 }
 
 export interface PendingUserInputDraftAnswer {
@@ -72,6 +73,9 @@ export function resolvePendingUserInputAnswer(
         : normalizeDraftAnswer(draft?.customAnswer);
   if (customAnswer !== null && customAnswer.length > 0) {
     return customAnswer;
+  }
+  if (question.required === false && question.options.length === 0) {
+    return "";
   }
 
   const selectedOptionValues = normalizeSelectedOptionValues(question, draft?.selectedOptionValues);
@@ -171,17 +175,17 @@ export function buildPendingUserInputAnswers(
   questions: ReadonlyArray<PendingUserInputQuestion>,
   draftAnswers: Record<string, PendingUserInputDraftAnswer>,
 ): Record<string, PendingUserInputAnswer> | null {
-  const answers: Record<string, PendingUserInputAnswer> = {};
+  const entries: Array<[string, PendingUserInputAnswer]> = [];
 
   for (const question of questions) {
     const answer = resolvePendingUserInputAnswer(question, draftAnswers[question.id]);
     if (answer === null) {
       return null;
     }
-    answers[question.id] = answer;
+    entries.push([question.id, answer]);
   }
 
-  return answers;
+  return Object.fromEntries(entries);
 }
 
 /** The Other text that should be sent instead of an offered option, if the user is answering that way. */
@@ -269,6 +273,7 @@ export function unansweredQuestionTakeoverText(
         .join("\n");
     })
     .join("\n\n");
+  // oxlint-disable-next-line t3code/no-untranslated-copy -- message sent to the agent
   return `The assistant asked a question that was not answered. This message takes over that turn.\n\n${body}`;
 }
 

@@ -151,7 +151,7 @@ export const TimelineRunModelChip = memo(function TimelineRunModelChip(props: {
           promptUltrathink: props.prompt ? readPromptUltrathink(props.prompt) : "none",
           modelOptions: props.modelSelection.options,
           allowPromptInjectedEffort: props.prompt !== undefined,
-          planModeEnabled: true,
+          includePlanAgent: true,
         },
         settings.effortDisplay,
         "xs",

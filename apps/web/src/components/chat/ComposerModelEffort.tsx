@@ -93,7 +93,7 @@ export type ComposerEffortTraitsInput = Pick<
   | "modelOptions"
   | "reportedModelSelection"
   | "allowPromptInjectedEffort"
-  | "planModeEnabled"
+  | "includePlanAgent"
 >;
 
 export function describeComposerEffort(

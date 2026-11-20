@@ -33,7 +33,9 @@ import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
 import "~/index.css";
 
+import { serverEnvironment } from "../../state/server";
 import { environmentThreadDetails } from "../../state/threads";
+import { CLAUDE_PROVIDER } from "../../../test/fakeEnvironment";
 import { act, fakeTimers, render, stubGlobal } from "../../../test/render";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { MessagesTimeline } from "./MessagesTimeline";
@@ -1221,6 +1223,34 @@ describe("MessagesTimeline usage limit notice", () => {
   it("shows the run model and traits on user messages and usage-limit rows", async () => {
     const instanceId = ProviderInstanceId.make("claudeAgent");
     const runId = RunId.make("usage-limit-run");
+    using _providers = vi.spyOn(serverEnvironment, "providersValueAtom").mockReturnValue(
+      Atom.make<unknown>([
+        {
+          ...CLAUDE_PROVIDER,
+          models: [
+            {
+              slug: "claude-sonnet-4-6",
+              name: "Claude Sonnet 4.6",
+              isCustom: false,
+              capabilities: {
+                optionDescriptors: [
+                  {
+                    id: "effort",
+                    label: "Effort",
+                    type: "select",
+                    options: [
+                      { id: "low", label: "Low" },
+                      { id: "high", label: "High" },
+                    ],
+                  },
+                  { id: "fastMode", label: "Fast Mode", type: "boolean" },
+                ],
+              },
+            },
+          ],
+        },
+      ]) as never,
+    );
     await using screen = await renderTimeline(
       [
         message("Prompt with run", {}, "msg-with-run"),

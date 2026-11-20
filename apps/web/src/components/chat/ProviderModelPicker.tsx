@@ -171,6 +171,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     retainedModel: retainedModelWhileProviderLocked(activeEntry, props.model),
     resolve,
   });
+  const withUnavailable = (model: string, isUnavailable: boolean | undefined) =>
+    isUnavailable ? gt("{model} (Unavailable)", { model }) : model;
   const showInstanceBadge =
     activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries);
 

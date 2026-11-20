@@ -18,6 +18,7 @@ import { useRouter } from "@tanstack/react-router";
 import { msg } from "gt-react";
 
 import { pickSnoozePreset, resolveSnoozePresets } from "../components/Sidebar.snooze";
+import { resolveSidebarThreadStatus } from "../components/Sidebar.logic";
 import {
   buildThreadActionMenuItems,
   threadActionRequiresOperate,
@@ -138,10 +139,23 @@ export function useThreadActionMenu(input: {
       };
       const isRegeneratingTitle = thread.titleRegeneration != null;
       const snoozePresets = resolveSnoozePresets(now, timestampFormat, threadRef.environmentId);
+      const sidebarStatus = resolveSidebarThreadStatus(thread);
+      const runtimeBusy =
+        thread.runtime !== null &&
+        ["preparing", "queued", "starting", "running", "waiting", "idle"].includes(
+          thread.runtime.status,
+        );
+      const canFollowOnBranch =
+        runtimeBusy ||
+        sidebarStatus === "working" ||
+        sidebarStatus === "preparing" ||
+        sidebarStatus === "waiting" ||
+        thread.startAfterThreadId != null;
       const items = buildThreadActionMenuItems({
         canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
         canFind: onFind !== undefined,
         branch: thread.branch ?? null,
+        canFollowOnBranch,
         projectFilter: null,
         isPinned: thread.pinnedAt != null,
         isSettled: supports.settlement && thread.settledOverride === "settled",
@@ -213,13 +227,16 @@ export function useThreadActionMenu(input: {
           });
           return;
         }
+        case "follow-on-thread-on-branch":
         case "new-thread-on-branch": {
+          const startAfterThreadId = action === "follow-on-thread-on-branch" ? thread.id : null;
           const result = await settlePromise(() =>
             handleNewThread(scopeProjectRef(threadRef.environmentId, thread.projectId), {
               branch: thread.branch,
               worktreePath: thread.worktreePath,
               envMode: thread.worktreePath ? "worktree" : "local",
               startFromOrigin: false,
+              startAfterThreadId,
             }),
           );
           if (result._tag === "Failure") {

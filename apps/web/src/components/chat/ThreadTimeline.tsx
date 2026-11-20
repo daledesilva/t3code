@@ -24,6 +24,7 @@ export function ThreadTimeline({
   activeThreadKey,
   syncing,
   detailLoading,
+  hiddenMessageIds,
   ...timelineProps
 }: Omit<ComponentProps<typeof MessagesTimeline>, "timelineEntries"> & {
   /** Null until the thread's detail may load; see resolveThreadDetailRef. */
@@ -34,6 +35,8 @@ export function ThreadTimeline({
   activeThreadKey: string | null;
   syncing: boolean;
   detailLoading: boolean;
+  /** User messages to leave out of the rendered timeline, such as one shown in the queue instead. */
+  hiddenMessageIds?: ReadonlySet<string> | undefined;
 }) {
   const visibleTurnItems = useTimelineVisibleTurnItems(threadDetailRef);
   const serverEntries = useIncrementalTimelineEntries(activeThreadKey, {
@@ -41,12 +44,19 @@ export function ThreadTimeline({
     visibleTurnItems,
   });
   const entries = draftEntries ?? serverEntries;
-  const displayedEntries = resolveThreadSwitchTimeline({
+  const switchedEntries = resolveThreadSwitchTimeline({
     loading: entries.length === 0 && syncing,
     activeThreadKey,
     nextEntries: entries,
     rememberedForActive: peekRememberedThreadTimeline<typeof entries>(activeThreadKey),
   });
+  // Filtered after the thread-switch cache, which keeps the full timeline.
+  const displayedEntries =
+    hiddenMessageIds === undefined || hiddenMessageIds.size === 0
+      ? switchedEntries
+      : switchedEntries.filter(
+          (entry) => entry.kind !== "message" || !hiddenMessageIds.has(entry.message.id),
+        );
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- stores the committed ready timeline in the module-level cache used during thread switches
   useLayoutEffect(() => {
     if (detailLoading || entries.length === 0 || timelineHasEphemeralPreviewUrls(entries)) {

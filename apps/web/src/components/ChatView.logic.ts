@@ -485,6 +485,7 @@ export function buildLocalDraftThread(
     archivedAt: null,
     settledOverride: null,
     settledAt: null,
+    startAfterThreadId: draftThread.startAfterThreadId ?? null,
     deletedAt: null,
   });
 }
@@ -1401,6 +1402,7 @@ export function deriveTimelineWorking(input: {
 export function planComposerTurn(input: {
   readonly messageText: string;
   readonly sendQueuesBehindSetup: boolean;
+  readonly hasStartAfterTrigger?: boolean;
   readonly isServerThread: boolean;
   readonly activeMessageCount: number;
   readonly sendEnvMode: DraftThreadEnvMode;
@@ -1439,12 +1441,15 @@ export function planComposerTurn(input: {
     baseBranchForWorktree: shouldCreateWorktree ? input.activeThreadBranch : null,
     compactBeforeSend,
     turnDispatchMode:
-      compactBeforeSend || (input.sendQueuesBehindSetup && dispatchMode !== "steer")
+      compactBeforeSend ||
+      input.hasStartAfterTrigger ||
+      (input.sendQueuesBehindSetup && dispatchMode !== "steer")
         ? ("queue" as const)
         : dispatchMode,
     shouldQueueBehindActiveRun:
       compactBeforeSend ||
       input.sendQueuesBehindSetup ||
+      Boolean(input.hasStartAfterTrigger) ||
       (input.phase === "running" && dispatchMode === "queue"),
   };
 }

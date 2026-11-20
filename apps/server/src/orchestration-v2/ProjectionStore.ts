@@ -232,6 +232,7 @@ export type ProjectionSettlementCandidate = Pick<
   | "autoSettleDisabledAt"
   | "snoozedUntil"
   | "snoozedAt"
+  | "startAfterThreadId"
   | "latestRunId"
   | "latestRunRequestedAt"
   | "latestRunStartedAt"
@@ -839,6 +840,9 @@ export interface ProjectionStoreV2Shape {
   readonly getHeldQueuedRuns: (
     threadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<OrchestrationV2Run>, ProjectionStoreV2Error>;
+  readonly getStartAfterFollowerThreads: (
+    startAfterThreadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<OrchestrationV2AppThread>, ProjectionStoreV2Error>;
   readonly getRecoveryThreadIds: (
     kind: ProjectionRecoveryKind,
     projects?: {
@@ -1045,6 +1049,7 @@ export function applyToProjection(
     case "thread.unsettled":
     case "thread.snoozed":
     case "thread.unsnoozed":
+    case "thread.start-after-updated":
     case "thread.auto-settle-set":
     case "thread.pinned":
     case "thread.unpinned":
@@ -1985,6 +1990,7 @@ export function threadShellFromProjection(
     unsettledAt: projection.thread.unsettledAt ?? null,
     snoozedUntil: projection.thread.snoozedUntil ?? null,
     snoozedAt: projection.thread.snoozedAt ?? null,
+    startAfterThreadId: projection.thread.startAfterThreadId ?? null,
     pinnedAt: projection.thread.pinnedAt ?? null,
 
     autoSettleDisabledAt: projection.thread.autoSettleDisabledAt ?? null,
@@ -2283,6 +2289,7 @@ function shellFromState(input: {
     unsettledAt: input.state.thread.unsettledAt ?? null,
     snoozedUntil: input.state.thread.snoozedUntil ?? null,
     snoozedAt: input.state.thread.snoozedAt ?? null,
+    startAfterThreadId: input.state.thread.startAfterThreadId ?? null,
     pinnedAt: input.state.thread.pinnedAt ?? null,
 
     autoSettleDisabledAt: input.state.thread.autoSettleDisabledAt ?? null,
@@ -2473,6 +2480,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             case "thread.unsettled":
             case "thread.snoozed":
             case "thread.unsnoozed":
+            case "thread.start-after-updated":
             case "thread.auto-settle-set":
             case "thread.pinned":
             case "thread.unpinned":
@@ -3314,6 +3322,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             event.type !== "thread.unsettled" &&
             event.type !== "thread.snoozed" &&
             event.type !== "thread.unsnoozed" &&
+            event.type !== "thread.start-after-updated" &&
             event.type !== "thread.auto-settle-set" &&
             event.type !== "thread.pinned" &&
             event.type !== "thread.unpinned" &&
@@ -6593,6 +6602,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             const rows = yield* sql<{ readonly ready: number }>`
           SELECT 1 AS ready FROM orchestration_v2_projection_threads AS thread
           WHERE thread.thread_id = ${threadId} AND thread.archived_at IS NULL AND thread.deleted_at IS NULL
+            AND json_extract(thread.payload_json, '$.startAfterThreadId') IS NULL
             AND EXISTS (SELECT 1 FROM orchestration_v2_projection_runs
               WHERE thread_id = ${threadId} AND status = 'queued'
                 AND json_extract(payload_json, '$.queueHeld') IS NOT 1)
@@ -6613,6 +6623,20 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       `.pipe(
         Effect.flatMap(decodeRows(decodeRunPayload, threadId)),
         Effect.mapError(controlReadError(threadId)),
+      );
+
+    const getStartAfterFollowerThreads: ProjectionStoreV2Shape["getStartAfterFollowerThreads"] = (
+      startAfterThreadId,
+    ) =>
+      sql<PayloadRow>`
+        SELECT payload_json FROM orchestration_v2_projection_threads
+        WHERE deleted_at IS NULL
+          AND json_extract(payload_json, '$.archivedAt') IS NULL
+          AND json_extract(payload_json, '$.startAfterThreadId') = ${startAfterThreadId}
+        ORDER BY created_at ASC, thread_id ASC
+      `.pipe(
+        Effect.flatMap(decodeRows(decodeThreadPayload, startAfterThreadId)),
+        Effect.mapError(controlReadError(startAfterThreadId)),
       );
 
     const getMessageCount: ProjectionStoreV2Shape["getMessageCount"] = (threadId) =>
@@ -8813,6 +8837,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   autoSettleDisabledAt: thread.autoSettleDisabledAt ?? null,
                   snoozedUntil: thread.snoozedUntil ?? null,
                   snoozedAt: thread.snoozedAt ?? null,
+                  startAfterThreadId: thread.startAfterThreadId ?? null,
                   status,
                   latestRunId,
                   latestRunRequestedAt:
@@ -9770,6 +9795,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getRun: readOnReader(getRun),
       canStartQueuedRun: readOnReader(canStartQueuedRun),
       getHeldQueuedRuns: readOnReader(getHeldQueuedRuns),
+      getStartAfterFollowerThreads: readOnReader(getStartAfterFollowerThreads),
       getPendingNativeUserInputs: readOnReader(getPendingNativeUserInputs),
       hasUnpairedRunInterruptRequest: readOnReader(hasUnpairedRunInterruptRequest),
       hasRunInterruptRequest: readOnReader(hasRunInterruptRequest),

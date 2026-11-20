@@ -1255,6 +1255,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     : null;
   const showResumeAction =
     canResume && !composerDraftHasUserContent(composerDraft) && !isEditingQueuedMessage;
+  const queueOnSubmit = !isEditingQueuedMessage && Boolean(activeThread?.startAfterThreadId);
   const collapsedComposerPrimaryActionDisabled =
     phase === "running" ||
     isSendBusy ||
@@ -1267,7 +1268,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ? gt("Resume thread")
     : props.resumeCompactionTokens !== null && !props.keepFullHistory
       ? gt("Open composer to compact and send")
-      : gt("Send message");
+      : queueOnSubmit
+        ? gt("Queue message")
+        : gt("Send message");
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
 
@@ -3869,6 +3872,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     canResume={showResumeAction}
                     preserveComposerFocusOnPointerDown={isMobileViewport}
                     isEditingQueuedMessage={isEditingQueuedMessage}
+                    queueOnSubmit={queueOnSubmit}
                     onSubmitMessage={handleSubmitMessageStable}
                     onResume={onResume}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}

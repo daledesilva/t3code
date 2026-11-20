@@ -59,6 +59,7 @@ interface ComposerPrimaryActionsProps {
   canResume?: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
   isEditingQueuedMessage?: boolean;
+  queueOnSubmit?: boolean;
   onSubmitMessage?: MouseEventHandler<HTMLButtonElement>;
   onResume?: () => void;
   onPreviousPendingQuestion: () => void;
@@ -251,6 +252,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   canResume = false,
   preserveComposerFocusOnPointerDown = false,
   isEditingQueuedMessage = false,
+  queueOnSubmit = false,
   onSubmitMessage,
   onResume,
   onPreviousPendingQuestion,
@@ -270,12 +272,13 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const shortcutModifiers = useShortcutModifierState();
   const isQueuing =
     !isEditingQueuedMessage &&
-    resolveComposerDispatchMode({
-      running: isRunning,
-      activeTurnDefault: followUpBehavior,
-      canSteer,
-      alternateModifier: shortcutModifiers.metaKey || shortcutModifiers.ctrlKey,
-    }) === "queue";
+    (queueOnSubmit ||
+      resolveComposerDispatchMode({
+        running: isRunning,
+        activeTurnDefault: followUpBehavior,
+        canSteer,
+        alternateModifier: shortcutModifiers.metaKey || shortcutModifiers.ctrlKey,
+      }) === "queue");
   const alternateAction = alternateComposerDispatchAction(followUpBehavior);
   const isSendDisabled = !canOperateThread || sendDisabledReason !== null;
   const stageBackdropVariant = useSidebarStageBackdropVariant(environmentIdentificationMode);
@@ -467,9 +470,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         <PlayIcon className="size-4 fill-current" aria-hidden="true" />
       ) : isEditingQueuedMessage ? (
         <CheckIcon className="size-4" aria-hidden="true" />
-      ) : isRunning && isQueuing ? (
+      ) : (isRunning || queueOnSubmit) && isQueuing ? (
         <ListPlusIcon className="size-4" aria-hidden="true" />
-      ) : isRunning ? (
+      ) : isRunning || queueOnSubmit ? (
         <CornerUpRightIcon className="size-4" aria-hidden="true" />
       ) : (
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">

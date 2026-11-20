@@ -148,7 +148,6 @@ function Harness(props: {
       canOperateThread
       pendingAction={null}
       isRunning={false}
-      canInterrupt={false}
       isSendBusy={result.isSaving}
       sendDisabledReason={null}
       isEnvironmentUnavailable={false}
@@ -157,7 +156,6 @@ function Harness(props: {
       isEditingQueuedMessage
       onSubmitMessage={() => void result.saveEdit(savedContent(draft.prompt), () => {})}
       onPreviousPendingQuestion={() => {}}
-      onInterrupt={() => {}}
     />
   ) : null;
 }
@@ -574,5 +572,37 @@ describe("useQueuedRunEdit", () => {
     expect(
       useComposerDraftStore.getState().getComposerDraft(requireHook(hook).draftTarget)?.prompt,
     ).toBe("newer");
+  });
+
+  it("keeps the submit button disabled while running with empty input and morphs to queue when content is entered", async () => {
+    const viewActions = (hasSendableContent: boolean) => (
+      <AppAtomRegistryProvider>
+        <ComposerPrimaryActions
+          compact={false}
+          canOperateThread
+          pendingAction={null}
+          isRunning
+          followUpBehavior="queue"
+          canSteer
+          isSendBusy={false}
+          sendDisabledReason={null}
+          isEnvironmentUnavailable={false}
+          isPreparingWorktree={false}
+          hasSendableContent={hasSendableContent}
+          onPreviousPendingQuestion={() => {}}
+        />
+      </AppAtomRegistryProvider>
+    );
+
+    await using screen = await render(viewActions(false));
+    const submitButton = screen.getByRole("button", { name: "Submit message" });
+    await expect.element(submitButton).toBeDisabled();
+    await expect
+      .element(screen.getByRole("button", { name: "Stop generation" }))
+      .not.toBeInTheDocument();
+
+    await screen.rerender(viewActions(true));
+    const queueButton = screen.getByRole("button", { name: "Queue message" });
+    await expect.element(queueButton).toBeEnabled();
   });
 });

@@ -470,7 +470,7 @@ describe("sidebar pinned placement and section dividers", () => {
       pinnedRow.compareDocumentPosition(searchHeader.element()) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(pinnedRow.querySelector('[data-testid="sidebar-row-card"]')?.className).toContain(
-      "ring-sidebar-border",
+      "ring-sidebar-foreground",
     );
     expect(searchHeader.element().className).toContain("border-t");
   });

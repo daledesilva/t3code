@@ -117,7 +117,7 @@ export function SidebarSearchHeader(props: { hasPinnedAbove: boolean; children: 
       data-testid="sidebar-search-header"
       className={cn(
         "relative z-[1] pb-2",
-        props.hasPinnedAbove && "mt-1.5 border-t border-sidebar-foreground pt-2",
+        props.hasPinnedAbove && "mt-1.5 border-t border-sidebar-muted-foreground pt-2",
       )}
     >
       {props.children}
@@ -145,7 +145,10 @@ export function SidebarSectionHeader(props: {
     <SortableSidebarMarker
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
-      className={cn("relative mx-0.5 h-8 border-t border-sidebar-foreground", props.className)}
+      className={cn(
+        "relative mx-0.5 h-8 border-t border-sidebar-muted-foreground",
+        props.className,
+      )}
     >
       <CollapsibleSectionHeader
         data-sidebar-row={`shelf:${shelf}`}

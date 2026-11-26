@@ -680,6 +680,24 @@ describe("sidebar drag projection", () => {
     expect(result.get(sidebarMarkerId("snoozed-header"))).toEqual({ ...stationary, y: 83 });
     expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(46);
   });
+
+  it("shifts the search header between pinned and active rows during drags", () => {
+    const searchHeader = marker("search-header");
+    const items = [
+      pinnedHeader,
+      thread("p1", "pinned"),
+      searchHeader,
+      divider,
+      thread("a1", "active"),
+      settledHeader,
+      marker("settled-placeholder"),
+    ];
+    const input = { items, settledOrder: [], settledExpanded: false };
+    const pinning = preview(input, "a1", sidebarMarkerId("search-header"));
+    expect(pinning.get(sidebarMarkerId("search-header"))?.y).toBe(83);
+    const unpinning = preview(input, "p1", "a1");
+    expect(unpinning.get(sidebarMarkerId("search-header"))?.y).toBe(-83);
+  });
 });
 
 describe("lifted card clearance", () => {

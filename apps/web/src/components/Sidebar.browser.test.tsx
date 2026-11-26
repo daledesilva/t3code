@@ -397,3 +397,81 @@ describe("sidebar settled pagination", () => {
     expect(screen.container.querySelectorAll("[data-thread-item]")).toHaveLength(loadedRows);
   });
 });
+
+describe("sidebar pinned placement and section dividers", () => {
+  it("renders pinned threads above the search bar with a card outline and top borders on sections", async () => {
+    const activeProject = project("active");
+    const pinnedThread = makeThreadFixture({
+      environmentId: activeProject.environmentId,
+      projectId: activeProject.id,
+      id: ThreadId.make("pinned-1"),
+      title: "Pinned thread",
+      pinnedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const activeThread = threadShell(activeProject.id, 1);
+    const settledThread = makeThreadFixture({
+      environmentId: activeProject.environmentId,
+      projectId: activeProject.id,
+      id: ThreadId.make("settled-1"),
+      title: "Settled thread",
+      settledOverride: "settled",
+      settledAt: "2026-01-01T00:00:00.000Z",
+    });
+    vi.mocked(useProjects).mockReturnValue([activeProject]);
+    vi.mocked(useServerConfigs).mockReturnValue(
+      new Map([
+        [
+          activeProject.environmentId,
+          {
+            scratchWorkspaceRoot: null,
+            shellThreadFamilies: false,
+          } as unknown as EnvironmentServerConfig,
+        ],
+      ]),
+    );
+    vi.mocked(useThreadRouteTarget).mockReturnValue({
+      kind: "server",
+      threadRef: { environmentId: activeProject.environmentId, threadId: activeThread.id },
+    });
+    vi.mocked(useHandleNewThread).mockReturnValue({
+      activeDraftThread: null,
+      activeThread: null,
+      defaultProjectRef: {
+        environmentId: activeProject.environmentId,
+        projectId: activeProject.id,
+      },
+      defaultProjectFallbackReady: true,
+      handleNewThread: vi.fn().mockResolvedValue(null),
+      routeDraftId: null,
+      routeThreadRef: { environmentId: activeProject.environmentId, threadId: activeThread.id },
+    });
+    vi.mocked(useQuietThreadShells).mockReturnValue([activeThread, settledThread]);
+
+    const tree = () => (
+      <SidebarProvider>
+        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+      </SidebarProvider>
+    );
+    await using screen = await render(tree());
+
+    const searchHeader = screen.getByTestId("sidebar-search-header");
+    await expect.element(searchHeader).toBeInTheDocument();
+    expect(searchHeader.element().className).not.toContain("border-t");
+    expect(screen.getByTestId("sidebar-settled-header").element().className).toContain("border-t");
+
+    vi.mocked(useQuietThreadShells).mockReturnValue([pinnedThread, activeThread, settledThread]);
+    await screen.rerender(tree());
+
+    const pinnedRow = screen.container.querySelector<HTMLElement>(
+      `[data-thread-item="${activeProject.environmentId}:${pinnedThread.id}"]`,
+    )!;
+    expect(pinnedRow).not.toBeNull();
+    expect(
+      pinnedRow.compareDocumentPosition(searchHeader.element()) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(pinnedRow.querySelector('[data-testid="sidebar-row-card"]')?.className).toContain(
+      "ring-sidebar-border",
+    );
+    expect(searchHeader.element().className).toContain("border-t");
+  });
+});

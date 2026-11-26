@@ -110,6 +110,21 @@ export function SidebarDragBoundary(props: {
   );
 }
 
+export function SidebarSearchHeader(props: { hasPinnedAbove: boolean; children: ReactNode }) {
+  return (
+    <SortableSidebarMarker
+      marker="search-header"
+      data-testid="sidebar-search-header"
+      className={cn(
+        "relative z-[1] pb-2",
+        props.hasPinnedAbove && "mt-1.5 border-t border-sidebar-border pt-2",
+      )}
+    >
+      {props.children}
+    </SortableSidebarMarker>
+  );
+}
+
 export function SidebarSectionHeader(props: {
   marker: "working-header" | "snoozed-header" | "settled-header";
   label: string;
@@ -130,7 +145,7 @@ export function SidebarSectionHeader(props: {
     <SortableSidebarMarker
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
-      className={cn("relative mx-0.5 h-8", props.className)}
+      className={cn("relative mx-0.5 h-8 border-t border-sidebar-border", props.className)}
     >
       <CollapsibleSectionHeader
         data-sidebar-row={`shelf:${shelf}`}

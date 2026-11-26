@@ -208,6 +208,7 @@ const SIDEBAR_MARKER_PREFIX = "sidebar-marker-";
 
 export type SidebarListMarker =
   | "pinned-header"
+  | "search-header"
   | "active-placeholder"
   | "settled-placeholder"
   | "pinned-divider"

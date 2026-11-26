@@ -115,10 +115,7 @@ export function SidebarSearchHeader(props: { hasPinnedAbove: boolean; children: 
     <SortableSidebarMarker
       marker="search-header"
       data-testid="sidebar-search-header"
-      className={cn(
-        "relative z-[1] pb-2",
-        props.hasPinnedAbove && "mt-1.5 border-t border-sidebar-muted-foreground pt-2",
-      )}
+      className={cn("relative z-[1] pb-2", props.hasPinnedAbove && "pt-1.5")}
     >
       {props.children}
     </SortableSidebarMarker>

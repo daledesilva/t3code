@@ -472,6 +472,6 @@ describe("sidebar pinned placement and section dividers", () => {
     expect(pinnedRow.querySelector('[data-testid="sidebar-row-card"]')?.className).toContain(
       "ring-sidebar-muted-foreground",
     );
-    expect(searchHeader.element().className).toContain("border-t");
+    expect(searchHeader.element().className).not.toContain("border-t");
   });
 });

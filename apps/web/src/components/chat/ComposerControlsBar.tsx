@@ -49,8 +49,8 @@ export function ComposerControlsBar(props: {
   routeKind: ChatComposerProps["routeKind"];
   routeThreadRef: ChatComposerProps["routeThreadRef"];
   draftId: ChatComposerProps["draftId"];
-  composerDraftTarget: ComposerThreadTarget;
-  isEditingQueuedMessage: boolean;
+  composerDraftTarget?: ComposerThreadTarget;
+  isEditingQueuedMessage?: boolean;
   contextImplication?: QueuedRunContextImplication | null | undefined;
   selectedProvider: ProviderDriverKind;
   selectedInstanceId: ProviderInstanceId;
@@ -100,7 +100,7 @@ export function ComposerControlsBar(props: {
     routeThreadRef,
     draftId,
     composerDraftTarget,
-    isEditingQueuedMessage,
+    isEditingQueuedMessage = false,
     contextImplication = null,
     selectedProvider,
     selectedInstanceId,
@@ -177,24 +177,25 @@ export function ComposerControlsBar(props: {
     onPromptEdit,
   });
   const effort = describeComposerEffort(traitsInput, props.effortDisplay, controlSize, m);
-  const restingBlockDefs = showModeBlock
-    ? [
-        {
-          id: "mode",
-          content: (
-            <ComposerFooterModeControls
-              runtimeMode={compatibleRuntimeMode}
-              runtimeModeOptions={compatibleRuntimeModeOptions}
-              size={controlSize}
-              hidden={composerControlsHidden || restingHiddenBlockCount > 0}
-              accessDisplay={accessDisplay}
-              emphasized={!accessMatchesDefault}
-              onRuntimeModeChange={handleRuntimeModeChange}
-            />
-          ),
-        },
-      ]
-    : [];
+  const restingBlockDefs =
+    showModeBlock && !isEditingQueuedMessage
+      ? [
+          {
+            id: "mode",
+            content: (
+              <ComposerFooterModeControls
+                runtimeMode={compatibleRuntimeMode}
+                runtimeModeOptions={compatibleRuntimeModeOptions}
+                size={controlSize}
+                hidden={composerControlsHidden || restingHiddenBlockCount > 0}
+                accessDisplay={accessDisplay}
+                emphasized={!accessMatchesDefault}
+                onRuntimeModeChange={handleRuntimeModeChange}
+              />
+            ),
+          },
+        ]
+      : [];
   // Its own element, so typing (which rebuilds the controls around it) leaves it cached.
   const composerModelPicker = (
     <ComposerModelPicker
@@ -234,16 +235,22 @@ export function ComposerControlsBar(props: {
       triggerSuffix={effort.suffix}
       triggerDetail={effort.detail}
       triggerShortcuts={
-        pickerOwnsModeShortcut ? "composer.effort composer.mode" : "composer.effort"
+        pickerOwnsModeShortcut && !isEditingQueuedMessage
+          ? "composer.effort composer.mode"
+          : "composer.effort"
       }
       effortColumn={<ComposerEffortColumn traits={traitsInput} />}
       footer={
-        <ComposerPickerFooter
-          traits={traitsInput}
-          runtimeMode={compatibleRuntimeMode}
-          runtimeModeOptions={compatibleRuntimeModeOptions}
-          onRuntimeModeChange={handleRuntimeModeChange}
-        />
+        isEditingQueuedMessage ? (
+          <ComposerPickerFooter traits={traitsInput} />
+        ) : (
+          <ComposerPickerFooter
+            traits={traitsInput}
+            runtimeMode={compatibleRuntimeMode}
+            runtimeModeOptions={compatibleRuntimeModeOptions}
+            onRuntimeModeChange={handleRuntimeModeChange}
+          />
+        )
       }
       terminalOpen={terminalOpen}
       open={modelPickerOpen}

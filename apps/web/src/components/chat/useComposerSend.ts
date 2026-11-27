@@ -159,7 +159,6 @@ import type { useLogicalProjectEnvironments } from "../../hooks/useLogicalProjec
 import type { useDraftEnvironmentRouting } from "./useDraftEnvironmentRouting";
 import type { useLocalDispatchState } from "./useLocalDispatchState";
 import type { usePendingThreadRequests } from "./usePendingThreadRequests";
-import type { useQueuedRunEdit } from "./useQueuedRunEdit";
 import type { useTimelineFollow } from "./useTimelineFollow";
 import type { useUsageLimitsPanel } from "./useUsageLimitsPanel";
 import type { useWorktreeSetup } from "./useWorktreeSetup";
@@ -242,7 +241,6 @@ interface ComposerSendInput {
   readonly composerFilesRef: { current: ComposerFileAttachment[] };
   readonly composerTerminalContextsRef: { current: TerminalContextDraft[] };
   readonly feedbackUploadsInFlightRef: { readonly current: Set<string> };
-  readonly queuedRunEdit: ReturnType<typeof useQueuedRunEdit>;
   readonly isRevertingCheckpoint: boolean;
   readonly threadDetailLoading: boolean;
   readonly activeEnvironmentUnavailable: boolean;
@@ -341,7 +339,6 @@ export function useComposerSend(input: ComposerSendInput) {
     composerFilesRef,
     composerTerminalContextsRef,
     feedbackUploadsInFlightRef,
-    queuedRunEdit,
     isRevertingCheckpoint,
     threadDetailLoading,
     activeEnvironmentUnavailable,
@@ -468,9 +465,7 @@ export function useComposerSend(input: ComposerSendInput) {
     const isCurrentRouteThread = () => currentRouteThreadKeyRef.current === routeThreadKey;
     // `/side` beats an open question and a plan follow-up, which would send the text to main.
     const sideChatCommand =
-      sendCtx && !directAnnotation && !queuedRunEdit.isEditing
-        ? parseSideChatCommand(promptAtSend)
-        : null;
+      sendCtx && !directAnnotation ? parseSideChatCommand(promptAtSend) : null;
     const answeringQuestion =
       Boolean(activePendingUserInput) && sendCtx?.answeringPendingUserInput !== false;
     const startsSideChat =
@@ -832,40 +827,6 @@ export function useComposerSend(input: ComposerSendInput) {
       useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.replyTo ?? null;
     const promptForSend = withReplyReference(draftPrompt, replyTo);
     if (warnStrandedThreadContext(promptForSend, composerThreadContexts)) return;
-    if (queuedRunEdit.isEditing) {
-      // A queued message stays in its thread, so saving `/side` would send it to main.
-      if (!directAnnotation && parseSideChatCommand(promptAtSend)) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "warning",
-            title: m(msg("Queued message not updated")),
-            description: m(
-              msg("A queued message can't move to a side chat. Remove /side or /btw to save it."),
-            ),
-          }),
-        );
-        return;
-      }
-      // Edit mode repurposes the composer: sending saves the queued message
-      // in place instead of dispatching a new turn.
-      await queuedRunEdit.saveEdit(
-        {
-          modelSelection: ctxSelectedModelSelection,
-          prompt: promptForSend,
-          images: composerImages,
-          files: composerFiles,
-          terminalContexts: composerTerminalContexts,
-          reviewComments: composerReviewComments,
-          previewAnnotations: composerPreviewAnnotations,
-          threadContexts: composerThreadContexts,
-          environmentContexts: composerEnvironmentContexts,
-          replyTo,
-        },
-        setThreadError,
-        { dispatchMode, submissionIntent },
-      );
-      return;
-    }
     const {
       trimmedPrompt: trimmed,
       sendableTerminalContexts: sendableComposerTerminalContexts,

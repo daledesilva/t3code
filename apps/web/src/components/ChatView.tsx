@@ -9,7 +9,6 @@ import {
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
-import { queuedRunEditBlockedReason } from "@t3tools/client-runtime/queued-run-edit";
 import { ScrollToEndButton, WorkspaceFileDropOverlay } from "./chat/TimelineOverlays";
 import { usePasteToFocusComposer } from "./chat/usePasteToFocusComposer";
 import { useFocusComposerOnThreadOpen } from "./chat/useFocusComposerOnThreadOpen";
@@ -111,7 +110,6 @@ import {
   workflowOpeningParentThreadId,
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
-  deriveThreadQueueWorkflowState,
   getUserQueuedThreadRuns,
   threadCanSteer,
   threadSupportsProviderHandoff,
@@ -573,10 +571,8 @@ export default function ChatView(props: ChatViewProps) {
     threadDraftTarget: baseComposerDraftTarget,
     activeThreadId: serverThread !== null || draftThread !== null ? threadId : null,
     serverProjection,
-    promptRef,
-    composerRef,
   });
-  const composerDraftTarget = queuedRunEdit.draftTarget;
+  const composerDraftTarget = baseComposerDraftTarget;
   const reportedModelSelection = serverProjection
     ? deriveReportedModelSelection(serverProjection)
     : null;
@@ -2673,14 +2669,12 @@ export default function ChatView(props: ChatViewProps) {
       entry.enabled &&
       entry.isAvailable,
   );
-  const pendingHandoff = queuedRunEdit.isEditing
-    ? null
-    : resolvePendingHandoff(
-        serverProjection,
-        pendingHandoffSelectionUsable ? pendingHandoffSelection : null,
-        providerStatuses,
-        { afterQueue: true },
-      );
+  const pendingHandoff = resolvePendingHandoff(
+    serverProjection,
+    pendingHandoffSelectionUsable ? pendingHandoffSelection : null,
+    providerStatuses,
+    { afterQueue: true },
+  );
   const compactThreadUnavailable =
     !canOperateThread ||
     !activeThread ||
@@ -2706,7 +2700,6 @@ export default function ChatView(props: ChatViewProps) {
     pendingHandoffSelectionUsable ? pendingHandoffSelection : null,
     providerStatuses,
     {
-      editingRunId: queuedRunEdit.editingRunId,
       freshSessionPending,
     },
   );
@@ -3202,7 +3195,6 @@ export default function ChatView(props: ChatViewProps) {
     composerFilesRef,
     composerTerminalContextsRef,
     feedbackUploadsInFlightRef,
-    queuedRunEdit,
     isRevertingCheckpoint,
     threadDetailLoading,
     activeEnvironmentUnavailable,
@@ -3317,11 +3309,51 @@ export default function ChatView(props: ChatViewProps) {
           threadId={activeThread.id}
           optimisticMessages={optimisticUserMessages}
           editingRunId={queuedRunEdit.editingRunId}
-          editBlockedReason={queuedRunEditBlockedReason(
-            { openQuestionCount: pendingUserInputs.length },
-            messages,
-          )}
+          editBlockedReason={
+            !canOperateThread ? gt("This connection cannot change threads.") : null
+          }
           onEditQueuedRun={queuedRunEdit.beginEdit}
+          inlineEditor={{
+            editDraftTarget: queuedRunEdit.editDraftTarget,
+            editingAttachments: queuedRunEdit.editingAttachments,
+            removedEditingAttachments: queuedRunEdit.removedEditingAttachments,
+            isSaving: queuedRunEdit.isSaving,
+            onCancelEdit: queuedRunEdit.cancelEdit,
+            onRemoveAttachment: queuedRunEdit.removeEditingAttachment,
+            onRestoreAttachment: queuedRunEdit.restoreEditingAttachment,
+            onSaveEdit: queuedRunEdit.saveEdit,
+            routeThreadRef,
+            activeThread,
+            activeThreadRuns: serverProjection?.runs ?? EMPTY_RUNS,
+            promptHistoryEntries: timelineEntries,
+            activeRuntime,
+            activeProjectId: activeProject?.id ?? null,
+            activeProjectName: activeProject?.title,
+            activeProjectDefaultModelSelection,
+            serverProjection,
+            providerStatuses: providerStatuses as ServerProvider[],
+            providerCatalogKnown: serverConfig !== null,
+            lockedProvider: modelPickerLockedProvider,
+            supportsProviderSwitchingViaHandoff,
+            canOperateThread,
+            attachmentUploadsCapabilityKnown,
+            supportsAttachmentUploads,
+            maxFileAttachmentBytes,
+            environmentUnavailable: activeEnvironmentUnavailableState,
+            canSteer,
+            phase,
+            resolvedTheme,
+            settings,
+            keybindings,
+            getShortcutContext: getShortcutContextStable,
+            gitCwd,
+            pullRequestProjectId: supportsPullRequests ? (activeProject?.id ?? null) : null,
+            pullRequestRepository: supportsPullRequests ? activeProjectRepository : null,
+            threadPullRequests: (activeThreadShell ?? activeThread)?.pullRequests,
+            setThreadError,
+            onExpandImage: onExpandTimelineImageStable,
+            onFileOpen: openFileAttachmentStable,
+          }}
           timestampFormat={timestampFormat}
           onOpenThread={onOpenRelatedThreadStable}
           onImageExpand={onExpandTimelineImageStable}
@@ -3855,10 +3887,7 @@ export default function ChatView(props: ChatViewProps) {
                     <ChildThreadApprovals threadRef={activeThreadRef} />
                     <div className="relative">
                       <ComposerSurface.Shell contextRow={showComposerContextStrip}>
-                        <ComposerSurface.Host
-                          inert={queuedRunEdit.isSaving}
-                          aria-busy={queuedRunEdit.isSaving}
-                        >
+                        <ComposerSurface.Host>
                           <div className="relative z-10">
                             {showProviderSubagentBar ? (
                               <ProviderSubagentBar
@@ -3922,7 +3951,6 @@ export default function ChatView(props: ChatViewProps) {
                                   (isSendBusy && !sendQueuesBehindSetup) ||
                                   (setupQueueSendThreadKey !== null &&
                                     setupQueueSendThreadKey === activeThreadKey) ||
-                                  queuedRunEdit.isSaving ||
                                   isResuming
                                 }
                                 canResume={canResume}
@@ -4036,24 +4064,6 @@ export default function ChatView(props: ChatViewProps) {
                                 setThreadError={setThreadError}
                                 onExpandImage={onExpandTimelineImageStable}
                                 onFileOpen={openFileAttachmentStable}
-                                editingQueuedAttachments={queuedRunEdit.editingAttachments}
-                                onCancelQueuedEdit={queuedRunEdit.cancelEdit}
-                                isPausedOnEditingQueuedMessage={
-                                  queuedRunEdit.editingRunId !== null &&
-                                  phase !== "running" &&
-                                  serverProjection !== null &&
-                                  deriveThreadQueueWorkflowState(serverProjection).queuedRuns[0]
-                                    ?.run.id === queuedRunEdit.editingRunId
-                                }
-                                removedEditingQueuedAttachments={
-                                  queuedRunEdit.removedEditingAttachments
-                                }
-                                onRemoveEditingQueuedAttachment={
-                                  queuedRunEdit.removeEditingAttachment
-                                }
-                                onRestoreEditingQueuedAttachment={
-                                  queuedRunEdit.restoreEditingAttachment
-                                }
                               />
                             )}
                           </div>

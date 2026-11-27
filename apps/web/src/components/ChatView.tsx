@@ -109,8 +109,10 @@ import {
   threadSupportsProviderHandoff,
 } from "@t3tools/client-runtime/state/thread-workflows";
 import { compactionBlocksSteering } from "@t3tools/client-runtime/state/composer-dispatch";
-import { resolvePendingHandoff } from "@t3tools/client-runtime/handoff";
-import { HandoffRow } from "./chat/V2LifecycleRow";
+import {
+  resolveComposerContextImplication,
+  resolvePendingHandoff,
+} from "@t3tools/client-runtime/handoff";
 import {
   codexFeedbackMessage,
   deriveWorkspaceMutationId,
@@ -2538,11 +2540,14 @@ export default function ChatView(props: ChatViewProps) {
       entry.enabled &&
       entry.isAvailable,
   );
-  const pendingHandoff = resolvePendingHandoff(
-    serverProjection,
-    pendingHandoffSelectionUsable ? pendingHandoffSelection : null,
-    providerStatuses,
-  );
+  const pendingHandoff = queuedRunEdit.isEditing
+    ? null
+    : resolvePendingHandoff(
+        serverProjection,
+        pendingHandoffSelectionUsable ? pendingHandoffSelection : null,
+        providerStatuses,
+        { afterQueue: true },
+      );
   const compactThreadUnavailable =
     !canOperateThread ||
     !activeThread ||
@@ -2563,6 +2568,15 @@ export default function ChatView(props: ChatViewProps) {
     activeMessageCount > 0 && serverConfig?.environment.capabilities.freshContext === true;
   const freshSessionArmed = useFreshSessionArmed(routeThreadKey);
   const freshSessionPending = freshSessionAvailable && freshSessionArmed;
+  const composerContextImplication = resolveComposerContextImplication(
+    serverProjection,
+    pendingHandoffSelectionUsable ? pendingHandoffSelection : null,
+    providerStatuses,
+    {
+      editingRunId: queuedRunEdit.editingRunId,
+      freshSessionPending,
+    },
+  );
   // The context window is the current conversation's, so neither a handoff destination nor
   // the fresh session armed by /clear inherits it.
   const resumeCompactionTokens =
@@ -3215,22 +3229,11 @@ export default function ChatView(props: ChatViewProps) {
   // The end of the timeline holds the thread's present and next turns: what it is doing now,
   // its lifecycle status, guest messages awaiting you, then your queued messages.
   const timelineFooter =
-    pendingHandoff === null &&
     !hasThreadNow &&
     threadStatusLine === null &&
     pendingGuestMessageCount === 0 &&
     !hasQueuedTurns ? null : (
       <>
-        {pendingHandoff === null ? null : (
-          <div className="chat-content-lane">
-            <HandoffRow
-              environmentId={environmentId}
-              endpoints={pendingHandoff}
-              providers={providerStatuses}
-              pending
-            />
-          </div>
-        )}
         <ThreadNow
           key={routeThreadKey}
           attention={attentionNow}
@@ -3705,6 +3708,7 @@ export default function ChatView(props: ChatViewProps) {
                               <ChatComposer
                                 canOperateThread={canOperateThread}
                                 reportedModelSelection={reportedModelSelection}
+                                contextImplication={composerContextImplication}
                                 multipleModelSelections={multipleModelSelections}
                                 supportsMultipleModels={
                                   serverConfig?.environment.capabilities

@@ -11721,20 +11721,30 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       yield* orchestrator.resumeQueuedRuns;
 
       yield* orchestrator.dispatch({
-        type: "queued-run.hold",
-        commandId: CommandId.make("runtime-layer-queued-edit-hold-off"),
+        type: "queued-run.edit",
+        commandId: CommandId.make("runtime-layer-queued-edit-model"),
         threadId,
         runId: firstMergeRun.id,
-        reason: "edit",
-        held: false,
+        text: "Updated queued prompt with new model",
+        modelSelection: {
+          instanceId: modelSelection.instanceId,
+          model: "gpt-5.4-mini",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        },
       });
 
-      const afterHoldReleased = yield* orchestrator.getThreadProjection(threadId);
+      const afterEditModel = yield* orchestrator.getThreadProjection(threadId);
+      const editedQueuedRun = afterEditModel.runs.find((run) => run.id === firstMergeRun.id);
       assert.equal(
-        afterHoldReleased.runs.find((run) => run.id === firstMergeRun.id)?.status,
+        editedQueuedRun?.status,
         "starting",
-        "releasing the edit hold starts the waiting prompt when the thread is idle",
+        "saving an edited queued run clears its edit hold and starts it when the thread is idle",
       );
+      assert.deepEqual(editedQueuedRun?.modelSelection, {
+        instanceId: modelSelection.instanceId,
+        model: "gpt-5.4-mini",
+        options: [{ id: "reasoningEffort", value: "high" }],
+      });
     }),
   );
 });

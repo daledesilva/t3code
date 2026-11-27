@@ -2770,11 +2770,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           !providerThreadPredatesBoundary(activeProviderThread, contextBoundary)
           ? activeProviderThread
           : rootProviderThreadsForProvider(projection, queuedRun.providerInstanceId)[0]
-        : freshContext &&
-            // The reserved row belongs to the instance the run queued on, which may have changed.
-            (storedProviderThread.providerInstanceId !== queuedRun.providerInstanceId ||
-              storedProviderThread.firstRunOrdinal !== null ||
-              storedProviderThread.nativeThreadRef !== null)
+        : storedProviderThread.providerInstanceId !== queuedRun.providerInstanceId ||
+            (freshContext &&
+              (storedProviderThread.firstRunOrdinal !== null ||
+                storedProviderThread.nativeThreadRef !== null))
           ? undefined
           : storedProviderThread;
       const queuedProviderThread: OrchestrationV2ProviderThread = targetProviderThread ?? {
@@ -12181,10 +12180,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Queued run ${command.runId} cannot be edited to an empty message.`,
       });
     }
-    const projection = yield* loadProjectionForCommand(command, ["runs", "messages", "turnItems"], {
-      turnItemTypes: ["user_message"],
-      messageRoles: ["user"],
-    });
+    const projection = yield* loadProjectionForCommand(
+      command,
+      command.modelSelection === undefined
+        ? ["runs", "messages", "turnItems"]
+        : ["runs", "messages", "turnItems", "providerThreads", "providerSessions"],
+      {
+        turnItemTypes: ["user_message"],
+        messageRoles: ["user"],
+      },
+    );
     const queuedRun = projection.runs.find((candidate) => candidate.id === command.runId);
     if (queuedRun === undefined || queuedRun.status !== "queued") {
       return yield* new OrchestratorDispatchError({
@@ -12221,17 +12226,98 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: "A guest's message cannot be edited. Cancel it instead.",
       });
     }
+    const now = yield* DateTime.now;
+    const requestedModelSelection = command.modelSelection;
+    const modelSelectionChanged =
+      requestedModelSelection !== undefined &&
+      !modelSelectionsEqual(queuedRun.modelSelection, requestedModelSelection);
+    const nextModelSelection = modelSelectionChanged
+      ? requestedModelSelection
+      : queuedRunModelSelection(projection, queuedRun);
+    let nextProviderThreadId = queuedRun.providerThreadId;
+    let newProviderThread: OrchestrationV2ProviderThread | null = null;
+    if (modelSelectionChanged) {
+      const targetAdapter = yield* providerAdapters
+        .get(requestedModelSelection.instanceId)
+        .pipe(mapDispatchError(command));
+      const existingTargetProviderThread =
+        queuedRun.freshContext === true
+          ? undefined
+          : requestedModelSelection.instanceId === queuedRun.providerInstanceId
+            ? projection.providerThreads.find(
+                (candidate) => candidate.id === queuedRun.providerThreadId,
+              )
+            : rootProviderThreadsForProvider(projection, requestedModelSelection.instanceId)[0];
+      const targetProviderSession =
+        existingTargetProviderThread?.providerSessionId == null
+          ? undefined
+          : projection.providerSessions.find(
+              (candidate) => candidate.id === existingTargetProviderThread.providerSessionId,
+            );
+      const targetCapabilities =
+        targetProviderSession?.capabilities ??
+        (yield* targetAdapter.getCapabilities().pipe(mapDispatchError(command)));
+      yield* mapDispatchError(command)(
+        commandPolicy.ensureQueuedMessages({
+          commandId: command.commandId,
+          threadId: command.threadId,
+          providerInstanceId: requestedModelSelection.instanceId,
+          capabilities: targetCapabilities,
+        }),
+      );
+      if (requestedModelSelection.instanceId !== queuedRun.providerInstanceId) {
+        if (existingTargetProviderThread !== undefined) {
+          nextProviderThreadId = existingTargetProviderThread.id;
+        } else {
+          newProviderThread = {
+            id: idAllocator.derive.providerThread({
+              driver: targetAdapter.driver,
+              nativeThreadId:
+                queuedRun.freshContext === true
+                  ? `pending:${queuedRun.id}:fresh`
+                  : `pending:${queuedRun.id}`,
+            }),
+            driver: targetAdapter.driver,
+            providerInstanceId: requestedModelSelection.instanceId,
+            providerSessionId: null,
+            appThreadId: command.threadId,
+            ownerNodeId: null,
+            nativeThreadRef: null,
+            nativeConversationHeadRef: null,
+            status: "not_loaded",
+            firstRunOrdinal: null,
+            lastRunOrdinal: null,
+            handoffIds: [],
+            forkedFrom: null,
+            createdAt: now,
+            updatedAt: now,
+          };
+          nextProviderThreadId = newProviderThread.id;
+        }
+      }
+    }
     yield* ensureGoalCommandSupported(
       command,
       { text: command.text, attachments: command.attachments ?? queuedMessage.attachments },
-      queuedRunModelSelection(projection, queuedRun).instanceId,
+      nextModelSelection.instanceId,
     );
     const queuedTurnItem = projection.turnItems.find(
       (candidate) => candidate.type === "user_message" && candidate.messageId === queuedMessage.id,
     );
 
-    const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
+    const effectiveProviderInstanceId = modelSelectionChanged
+      ? requestedModelSelection.instanceId
+      : queuedRun.providerInstanceId;
+    if (newProviderThread !== null) {
+      yield* emitEvent({
+        type: "provider-thread.updated",
+        threadId: command.threadId,
+        providerInstanceId: newProviderThread.providerInstanceId,
+        occurredAt: now,
+        payload: newProviderThread,
+      });
+    }
     const editedAttachments =
       command.attachments === undefined ? {} : { attachments: command.attachments };
     yield* emitEvent({
@@ -12239,7 +12325,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       threadId: command.threadId,
       runId: queuedRun.id,
       ...(queuedRun.rootNodeId === null ? {} : { nodeId: queuedRun.rootNodeId }),
-      providerInstanceId: queuedRun.providerInstanceId,
+      providerInstanceId: effectiveProviderInstanceId,
       occurredAt: now,
       payload: withoutGuestAttribution({
         ...queuedMessage,
@@ -12255,7 +12341,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         threadId: command.threadId,
         runId: queuedRun.id,
         ...(queuedRun.rootNodeId === null ? {} : { nodeId: queuedRun.rootNodeId }),
-        providerInstanceId: queuedRun.providerInstanceId,
+        providerInstanceId: effectiveProviderInstanceId,
         occurredAt: now,
         payload: withoutGuestAttribution({
           ...queuedTurnItem,
@@ -12266,15 +12352,25 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }),
       });
     }
-    if (hasRunHoldReason(queuedRun, "edit")) {
+    const hadEditHold = hasRunHoldReason(queuedRun, "edit");
+    if (hadEditHold || modelSelectionChanged) {
+      const nextRunBase = hadEditHold ? removeRunHoldReasons(queuedRun, ["edit"]) : queuedRun;
+      const updatedRun: OrchestrationV2Run = modelSelectionChanged
+        ? {
+            ...nextRunBase,
+            providerInstanceId: requestedModelSelection.instanceId,
+            modelSelection: requestedModelSelection,
+            providerThreadId: nextProviderThreadId,
+          }
+        : nextRunBase;
       yield* emitEvent({
         type: "run.updated",
         threadId: command.threadId,
         runId: queuedRun.id,
         ...(queuedRun.rootNodeId === null ? {} : { nodeId: queuedRun.rootNodeId }),
-        providerInstanceId: queuedRun.providerInstanceId,
+        providerInstanceId: updatedRun.providerInstanceId,
         occurredAt: now,
-        payload: removeRunHoldReasons(queuedRun, ["edit"]),
+        payload: updatedRun,
       });
     }
     // Thread deletion only cleans files the thread still references.

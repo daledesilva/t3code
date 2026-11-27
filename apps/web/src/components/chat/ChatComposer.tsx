@@ -1,3 +1,4 @@
+import type { QueuedRunContextImplication } from "@t3tools/client-runtime/handoff";
 import { copySnapshot } from "./copySnapshot";
 import { VoiceInputSetup } from "./VoiceInputSetup";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
@@ -420,6 +421,7 @@ export interface ChatComposerProps {
   activeProjectDefaultModelSelection: ModelSelection | null | undefined;
   activeThreadModelSelection: ModelSelection | null | undefined;
   reportedModelSelection?: ModelSelection | null;
+  contextImplication?: QueuedRunContextImplication | null | undefined;
   activeProjectId: ProjectId | null;
   projectName?: string | undefined;
 
@@ -582,6 +584,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onFileOpen,
     editingQueuedAttachments,
     isPausedOnEditingQueuedMessage = false,
+    contextImplication = null,
     onCancelQueuedEdit,
     onRemoveEditingQueuedAttachment,
   } = props;
@@ -2514,6 +2517,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       routeKind={routeKind}
       routeThreadRef={routeThreadRef}
       draftId={draftId}
+      composerDraftTarget={composerDraftTarget}
+      isEditingQueuedMessage={isEditingQueuedMessage}
+      contextImplication={contextImplication}
       selectedProvider={selectedProvider}
       selectedInstanceId={selectedInstanceId}
       selectedModel={selectedModel}
@@ -3150,7 +3156,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       },
       openModelPicker: openModelPickerStable,
       stepReasoningEffort: (direction) => {
-        if (noProviderAvailable || pendingUserInputs.length > 0 || isEditingQueuedMessage) {
+        if (noProviderAvailable || pendingUserInputs.length > 0) {
           return;
         }
         const change = getComposerReasoningStep({
@@ -3159,7 +3165,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           model: selectedModel,
           models: selectedProviderModels,
           modelOptions: composerModelOptions?.[selectedInstanceId],
-          reportedModelSelection,
+          reportedModelSelection: isEditingQueuedMessage ? null : reportedModelSelection,
           prompt: promptRef.current,
           cursor: readComposerSnapshotStable().expandedCursor,
           direction,
@@ -3170,9 +3176,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           .setProviderModelOptions(composerDraftTarget, selectedProvider, change.modelOptions, {
             instanceId: selectedInstanceId,
             model: selectedModel,
-            persistSticky: true,
+            persistSticky: !isEditingQueuedMessage,
           });
-        applyThreadModelPick(composerDraftTarget);
+        if (!isEditingQueuedMessage) applyThreadModelPick(composerDraftTarget);
         if (change.prompt !== promptRef.current) {
           applyPromptReplacementStable(0, promptRef.current.length, change.prompt, {
             expandedCursorAfterReplace: change.cursor,

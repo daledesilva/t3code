@@ -3576,6 +3576,8 @@ export const OrchestrationV2Command = Schema.Union([
     text: Schema.String,
     // Replaces all attachments; absent preserves them for older clients editing text.
     attachments: Schema.optional(Schema.Array(ChatAttachment)),
+    // Replaces the queued run's frozen model/provider selection when omitted preserves it.
+    modelSelection: Schema.optional(ModelSelection),
   }),
   Schema.Struct({
     type: Schema.Literal("runtime-request.respond"),

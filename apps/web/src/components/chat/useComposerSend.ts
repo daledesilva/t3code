@@ -813,6 +813,7 @@ export function useComposerSend(input: ComposerSendInput) {
           threadContexts: composerThreadContexts,
           environmentContexts: composerEnvironmentContexts,
           replyTo,
+          modelSelection: ctxSelectedModelSelection,
         },
         setThreadError,
         { dispatchMode, submissionIntent },

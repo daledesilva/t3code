@@ -290,6 +290,7 @@ export interface RetryWorkspacePreparationInput extends ThreadCommandInput {
 export interface EditQueuedRunInput extends ThreadCommandInput {
   readonly runId: RunId;
   readonly text: string;
+  readonly modelSelection?: ModelSelection;
   /**
    * Full replacement attachment list for the queued message. Omitted =
    * text-only edit that leaves attachments untouched.
@@ -1241,6 +1242,7 @@ export const editQueuedRun = Effect.fn("EnvironmentCommands.editQueuedRun")(func
     threadId: input.threadId,
     runId: input.runId,
     text: input.text,
+    ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
     ...(attachments === undefined ? {} : { attachments }),
     ...(input.edit?.context && attachments
       ? {

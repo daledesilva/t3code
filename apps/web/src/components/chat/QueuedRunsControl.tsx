@@ -16,7 +16,12 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  resolveQueuedRunSelectionDiffs,
+  type QueuedRunSelectionDiff,
+} from "@t3tools/client-runtime/handoff";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -27,12 +32,15 @@ import {
   isAttachmentOnlyBootstrapPrompt,
   replaceComposerContextReferences,
 } from "@t3tools/shared/composerContextReferences";
-import type {
-  ChatAttachment as ContractChatAttachment,
-  EnvironmentId,
-  MessageId,
-  RunId,
-  ThreadId,
+import {
+  ProviderDriverKind,
+  type ChatAttachment as ContractChatAttachment,
+  type EnvironmentId,
+  type MessageId,
+  type ModelSelection,
+  type RunId,
+  type ServerProvider,
+  type ThreadId,
 } from "@t3tools/contracts";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
@@ -52,6 +60,11 @@ import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 
 import { useAssetUrls } from "../../assets/assetUrls";
+import {
+  applyProviderInstanceSettings,
+  deriveProviderInstanceEntries,
+} from "../../providerInstances";
+import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { threadEnvironment } from "../../state/threads";
 import { useQuietThreadProjection, useQuietThreadShell } from "../../state/entities";
 import { useEnvironment } from "../../state/environments";
@@ -63,9 +76,11 @@ import { toastManager } from "../ui/toast";
 import { m } from "../../i18n/messages";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
+import { ContextImplicationInfo, resolveSelectionDisplay } from "./ContextImplicationInfo";
 import { GuestMessageName } from "./guestMessageStyle";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
+import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { TimelineRowTimestamp } from "./TimelineRowParts";
 import { FoldedMessageHeader, useScheduledTaskTitle } from "./TimelineUserMessageRow";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
@@ -75,6 +90,7 @@ export interface EditQueuedRunRequest {
   readonly messageId: MessageId;
   readonly text: string;
   readonly attachments: ReadonlyArray<ContractChatAttachment>;
+  readonly modelSelection?: ModelSelection;
 }
 
 // A longer queue shows its first messages and a button that shows the rest.
@@ -123,6 +139,9 @@ export function QueuedRunsControl({
   const projection = useQuietThreadProjection(
     scopeThreadRef(props.environmentId, props.threadId),
   )?.projection;
+  const providers =
+    useAtomValue(serverEnvironment.providersValueAtom(props.environmentId)) ??
+    EMPTY_SERVER_PROVIDERS;
   const promote = useAtomCommand(threadEnvironment.promoteQueuedRun);
   const resume = useAtomCommand(threadEnvironment.resumeThreadQueue);
   const cancel = useAtomCommand(threadEnvironment.cancelQueuedRun);
@@ -146,6 +165,7 @@ export function QueuedRunsControl({
   );
   const workflow = projection ? deriveThreadQueueWorkflowState(projection, messages) : null;
   const queued = workflow?.queuedRuns ?? [];
+  const selectionDiffs = resolveQueuedRunSelectionDiffs(projection, queued, providers, messages);
   const activeRun = workflow?.activeRun ?? null;
   // A fresh message starts its own turn: it may skip compaction, but not steer into a turn.
   const canSendRun = (freshContext: boolean) =>
@@ -167,6 +187,8 @@ export function QueuedRunsControl({
       message,
       runId: run.id,
       messageId: run.userMessageId,
+      modelSelection: run.modelSelection,
+      selectionDiff: selectionDiffs[serverIndex] ?? null,
       freshContext: run.freshContext === true,
       serverIndex,
       text,
@@ -188,6 +210,8 @@ export function QueuedRunsControl({
       message: undefined,
       runId: null,
       messageId: null,
+      modelSelection: undefined,
+      selectionDiff: null,
       freshContext: false,
       serverIndex: null,
       text: message.text,
@@ -257,6 +281,9 @@ export function QueuedRunsControl({
           messageId: latest.run.userMessageId,
           text: latest.text,
           attachments: latest.attachments,
+          ...(latest.run.modelSelection === undefined
+            ? {}
+            : { modelSelection: latest.run.modelSelection }),
         });
       }
       return true;
@@ -400,6 +427,9 @@ export function QueuedRunsControl({
                       messageId: item.messageId,
                       text: item.text,
                       attachments: item.attachments,
+                      ...(item.modelSelection === undefined
+                        ? {}
+                        : { modelSelection: item.modelSelection }),
                     });
                   }
                 : null;
@@ -465,6 +495,8 @@ export function QueuedRunsControl({
                   {({ reorder }) => (
                     <QueuedMessage
                       environmentId={props.environmentId}
+                      providers={providers}
+                      selectionDiff={item.selectionDiff}
                       message={item.message}
                       previewText={previewText}
                       thumbnails={item.thumbnails}
@@ -625,6 +657,8 @@ type QueuedRunMessage = NonNullable<ThreadQueueProjection["messages"][number]>;
 /** A queued turn wears its sent form's attribution; only the dashed edge and controls differ. */
 function QueuedMessage(props: {
   readonly environmentId: EnvironmentId;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly selectionDiff: QueuedRunSelectionDiff | null;
   readonly message: QueuedRunMessage | undefined;
   readonly previewText: string;
   readonly thumbnails: ReadonlyArray<ChatImageAttachment>;
@@ -731,6 +765,15 @@ function QueuedMessage(props: {
               fold !== null && expanded && "w-full",
             )}
           >
+            {props.selectionDiff !== null ? (
+              <div className={cn("self-start", fold !== null ? "px-3 pt-2" : "mb-1.5")}>
+                <QueuedSelectionDiffBadge
+                  environmentId={props.environmentId}
+                  providers={props.providers}
+                  diff={props.selectionDiff}
+                />
+              </div>
+            ) : null}
             {fold ? (
               <FoldedMessageHeader
                 icon={fold.icon}
@@ -748,6 +791,30 @@ function QueuedMessage(props: {
                   fold !== null && "max-h-96 overflow-auto px-3 pb-2",
                 )}
               >
+                {/* In full, like a sent turn: a queued message is read before it is sent. */}
+                {props.previewText || props.onEdit ? (
+                  <p className="whitespace-pre-wrap wrap-anywhere">
+                    {props.previewText}
+                    {props.onEdit ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <span className="ms-3 inline-block translate-y-px align-baseline leading-none text-muted-foreground" />
+                          }
+                        >
+                          <PencilIcon
+                            aria-hidden
+                            className="block size-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={1.75}
+                          />
+                        </TooltipTrigger>
+                        <TooltipPopup>{props.editLabel}</TooltipPopup>
+                      </Tooltip>
+                    ) : null}
+                  </p>
+                ) : null}
                 {props.thumbnails.length > 0 ? (
                   <span className="flex flex-wrap items-center gap-1">
                     {props.thumbnails.map((thumbnail) => (
@@ -778,30 +845,6 @@ function QueuedMessage(props: {
                       </button>
                     ))}
                   </span>
-                ) : null}
-                {/* In full, like a sent turn: a queued message is read before it is sent. */}
-                {props.previewText || props.onEdit ? (
-                  <p className="whitespace-pre-wrap wrap-anywhere">
-                    {props.previewText}
-                    {props.onEdit ? (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <span className="ms-3 inline-block translate-y-px align-baseline leading-none text-muted-foreground" />
-                          }
-                        >
-                          <PencilIcon
-                            aria-hidden
-                            className="block size-3.5"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth={1.75}
-                          />
-                        </TooltipTrigger>
-                        <TooltipPopup>{props.editLabel}</TooltipPopup>
-                      </Tooltip>
-                    ) : null}
-                  </p>
                 ) : null}
               </div>
             ) : null}
@@ -899,5 +942,77 @@ function QueuedMessage(props: {
         </div>
       </div>
     </>
+  );
+}
+
+function QueuedSelectionDiffBadge(props: {
+  readonly environmentId: EnvironmentId;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly diff: QueuedRunSelectionDiff;
+}) {
+  const settings = useAtomValue(serverEnvironment.settingsValueAtom(props.environmentId));
+  const derived = deriveProviderInstanceEntries(props.providers);
+  const entries = settings ? applyProviderInstanceSettings(derived, settings, null) : derived;
+  const target = resolveSelectionDisplay(props.diff.to, entries);
+  const textParts = [
+    props.diff.modelChanged ? target.modelLabel : null,
+    props.diff.effortLabel,
+    props.diff.speedLabel,
+  ].filter((part): part is string => part !== null && part.length > 0);
+  const badgeText = textParts.join(" · ");
+  const hasSelectionBadge = props.diff.providerChanged || badgeText.length > 0;
+  const fullTooltip = [
+    target.providerLabel,
+    target.modelLabel,
+    props.diff.effortLabel,
+    props.diff.speedLabel,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
+  const driverKind = target.entry?.driverKind ?? ProviderDriverKind.make(props.diff.to.instanceId);
+
+  return (
+    <div data-slot="queued-selection-diff" className="flex max-w-full flex-wrap items-center gap-1">
+      {hasSelectionBadge ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                data-slot="queued-model-badge"
+                aria-label={fullTooltip}
+                className={cn(
+                  "inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border border-border/70 bg-muted/50 py-0.5 text-2xs font-medium leading-none text-foreground/80",
+                  badgeText ? "px-1.5" : "px-1",
+                )}
+              />
+            }
+          >
+            {props.diff.providerChanged ? (
+              <ProviderInstanceIcon
+                driverKind={driverKind}
+                displayName={target.providerLabel}
+                accentColor={target.entry?.accentColor}
+                acpRegistryAgentId={target.entry?.acpRegistryAgentId}
+                acpRegistryIconUrl={target.entry?.acpRegistryIconUrl}
+                showBadge={target.showInstanceBadge}
+                size="compact"
+                iconClassName="size-3"
+                indicatorBackground="var(--muted)"
+              />
+            ) : null}
+            {badgeText ? <span className="truncate">{badgeText}</span> : null}
+          </TooltipTrigger>
+          <TooltipPopup>{fullTooltip}</TooltipPopup>
+        </Tooltip>
+      ) : null}
+      {props.diff.contextImplication !== null ? (
+        <ContextImplicationInfo
+          implication={props.diff.contextImplication}
+          entries={entries}
+          align="start"
+          size="badge"
+        />
+      ) : null}
+    </div>
   );
 }

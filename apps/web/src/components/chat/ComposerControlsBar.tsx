@@ -1,4 +1,5 @@
 import type { ChatComposerProps } from "./ChatComposer";
+import type { ComposerThreadTarget } from "../../composerDraftStore";
 import type { PromptUltrathink } from "./TraitsPicker";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { type AppModelOption } from "../../modelSelection";
@@ -6,6 +7,8 @@ import { useGT, useMessages } from "gt-react";
 import { CircleAlertIcon } from "lucide-react";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerControl } from "./ComposerControl";
+import { ContextImplicationInfo } from "./ContextImplicationInfo";
+import type { QueuedRunContextImplication } from "@t3tools/client-runtime/handoff";
 import {
   ComposerFooterModeControls,
   ComposerModelPicker,
@@ -46,6 +49,9 @@ export function ComposerControlsBar(props: {
   routeKind: ChatComposerProps["routeKind"];
   routeThreadRef: ChatComposerProps["routeThreadRef"];
   draftId: ChatComposerProps["draftId"];
+  composerDraftTarget: ComposerThreadTarget;
+  isEditingQueuedMessage: boolean;
+  contextImplication?: QueuedRunContextImplication | null | undefined;
   selectedProvider: ProviderDriverKind;
   selectedInstanceId: ProviderInstanceId;
   selectedModel: string;
@@ -93,6 +99,9 @@ export function ComposerControlsBar(props: {
     routeKind,
     routeThreadRef,
     draftId,
+    composerDraftTarget,
+    isEditingQueuedMessage,
+    contextImplication = null,
     selectedProvider,
     selectedInstanceId,
     selectedModel,
@@ -150,17 +159,20 @@ export function ComposerControlsBar(props: {
   const m = useMessages();
   const applyThreadModelPick = useApplyThreadModelPick();
   const applyRouteThreadModelPick = useStableCallback(() => applyThreadModelPick(routeThreadRef));
+  const isQueuedEditTarget = isEditingQueuedMessage && typeof composerDraftTarget === "string";
   const traitsInput = resolveComposerTraitsInput({
     provider: selectedProvider,
     instanceId: selectedInstanceId,
-    ...(routeKind === "server"
-      ? { threadRef: routeThreadRef, onDraftModelOptionsChange: applyRouteThreadModelPick }
-      : {}),
-    ...(routeKind === "draft" && draftId ? { draftId } : {}),
+    ...(isQueuedEditTarget
+      ? { draftId: composerDraftTarget, persistSticky: false }
+      : routeKind === "server"
+        ? { threadRef: routeThreadRef, onDraftModelOptionsChange: applyRouteThreadModelPick }
+        : {}),
+    ...(!isQueuedEditTarget && routeKind === "draft" && draftId ? { draftId } : {}),
     model: selectedModel,
     models: selectedProviderModels,
     modelOptions: composerModelOptions?.[selectedInstanceId],
-    reportedModelSelection,
+    reportedModelSelection: isEditingQueuedMessage ? null : reportedModelSelection,
     promptUltrathink,
     onPromptEdit,
   });
@@ -265,6 +277,15 @@ export function ComposerControlsBar(props: {
     </ComposerControl>
   ) : (
     <>
+      {contextImplication !== null ? (
+        <ContextImplicationInfo
+          implication={contextImplication}
+          entries={providerInstanceEntries}
+          align={composerControlsCollapsed ? "start" : "end"}
+          size="composer"
+          dataSlot="composer-context-info"
+        />
+      ) : null}
       {composerModelPicker}
 
       <>

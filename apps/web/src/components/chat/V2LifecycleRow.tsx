@@ -661,11 +661,10 @@ export function ModelSwitchRow(props: {
   );
 }
 
-export function HandoffRow(props: {
+function HandoffRow(props: {
   readonly environmentId: EnvironmentId;
   readonly endpoints: HandoffEndpoints;
   readonly providers: ReadonlyArray<ServerProvider>;
-  readonly pending?: boolean;
   readonly failed?: boolean;
 }) {
   const gt = useGT();
@@ -675,7 +674,7 @@ export function HandoffRow(props: {
   const entries = settings ? applyProviderInstanceSettings(derived, settings, null) : derived;
   return (
     <TimelineSystemDivider
-      label={props.pending ? gt("Context handoff pending") : gt("Context handoff")}
+      label={gt("Context handoff")}
       icon={ArrowRightLeftIcon}
       showDetailSeparator={false}
       tone={props.failed ? "danger" : "neutral"}

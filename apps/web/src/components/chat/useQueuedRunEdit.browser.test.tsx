@@ -284,6 +284,56 @@ describe("useQueuedRunEdit", () => {
     },
   );
 
+  it("seeds the queued run modelSelection into the edit draft and saves changes", async () => {
+    const { ProviderInstanceId } = await import("@t3tools/contracts");
+    const { hook } = setup();
+    mocks.editQueuedRun.mockResolvedValue({ _tag: "Success" });
+    await using _screen = await render(view(THREAD_A, "queued", hook));
+    const originalSelection = {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.4",
+    };
+    const nextSelection = {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-opus-4-6",
+      options: [{ id: "effort", value: "high" }],
+    };
+
+    await act(() =>
+      requireHook(hook).beginEdit({
+        runId: RUN,
+        messageId: MessageId.make("message-1"),
+        text: "original",
+        attachments: [],
+        modelSelection: originalSelection,
+      }),
+    );
+
+    const editDraft = useComposerDraftStore
+      .getState()
+      .getComposerDraft(requireHook(hook).draftTarget);
+    expect(editDraft?.modelSelectionExplicit).toBe(true);
+    expect(editDraft?.activeProvider).toBe(originalSelection.instanceId);
+    expect(editDraft?.modelSelectionByProvider[originalSelection.instanceId]).toEqual(
+      originalSelection,
+    );
+
+    await act(() =>
+      requireHook(hook).saveEdit(
+        { ...savedContent("original"), modelSelection: nextSelection },
+        () => {},
+      ),
+    );
+    expect(mocks.editQueuedRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          runId: RUN,
+          modelSelection: nextSelection,
+        }),
+      }),
+    );
+  });
+
   it.each([
     // Cmd+Enter or Cmd-click with Queue as the default: save, then steer.
     { dispatchMode: "steer", submissionIntent: "alternate", steers: true },

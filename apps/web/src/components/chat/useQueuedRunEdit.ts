@@ -17,6 +17,7 @@ import {
   type ResponseContextRecord,
   type EnvironmentId,
   type MessageId,
+  type ModelSelection,
   type OrchestrationMessageContext,
   type PreviewAnnotationPayload,
   type RunId,
@@ -29,6 +30,7 @@ import {
   restoreAttachmentOnlyBootstrapPrompt,
   stripAttachmentOnlyBootstrapPrompt,
 } from "@t3tools/shared/composerContextReferences";
+import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { Atom } from "effect/reactivity";
 import type { RefObject } from "react";
 import { useAssetUrls } from "../../assets/assetUrls";
@@ -80,6 +82,7 @@ interface EditingQueuedRun {
   readonly runId: RunId;
   readonly messageId: MessageId;
   readonly originalText: string;
+  readonly originalModelSelection?: ModelSelection | undefined;
   readonly existingAttachments: ReadonlyArray<ChatAttachment>;
   readonly context?: OrchestrationMessageContext | undefined;
   /** Removing a server attachment changes the message even when the draft looks untouched. */
@@ -102,6 +105,7 @@ interface QueuedRunEditContent {
   readonly threadContexts: ReadonlyArray<ThreadContextRecord>;
   readonly environmentContexts: ReadonlyArray<EnvironmentContextRecord>;
   readonly replyTo?: ResponseContextRecord | null;
+  readonly modelSelection?: ModelSelection | undefined;
 }
 
 const isDraftOwnedRecord = (record: ComposerContextRecord) =>
@@ -171,12 +175,19 @@ async function submitQueuedRunEdit(input: {
           attachmentId: uploads[editing.existingAttachments.length + index]?.id ?? attachment.id,
         })),
       })?.records ?? [];
+    const updatedModelSelection =
+      content.modelSelection !== undefined &&
+      (editing.originalModelSelection === undefined ||
+        !modelSelectionsEqual(editing.originalModelSelection, content.modelSelection))
+        ? content.modelSelection
+        : undefined;
     const result = await input.editQueuedRun({
       environmentId,
       input: {
         threadId: editing.threadId,
         runId: editing.runId,
         text: restoreAttachmentOnlyBootstrapPrompt(editText, uploads.length > 0),
+        ...(updatedModelSelection === undefined ? {} : { modelSelection: updatedModelSelection }),
         edit: {
           messageId: editing.messageId,
           attachments: uploads,
@@ -286,9 +297,18 @@ export function useQueuedRunEdit(input: {
     // Only the reply the text still points at: a removed or replaced one stays behind as a record.
     const reply = records.find(isResponseContextRecord);
     const text = reply ? removeInlineContextReference(sentText, reply.contextId).prompt : sentText;
+    const modelSelection =
+      request.modelSelection ??
+      serverProjection?.runs.find((run) => run.id === request.runId)?.modelSelection;
     const store = useComposerDraftStore.getState();
     store.clearComposerContent(target);
     store.setPrompt(target, text);
+    if (modelSelection !== undefined) {
+      store.setModelSelection(target, modelSelection, {
+        explicit: true,
+        replaceOptions: true,
+      });
+    }
     store.setThreadContexts(
       target,
       records.filter((record): record is ThreadContextRecord => record.kind === "thread"),
@@ -315,6 +335,7 @@ export function useQueuedRunEdit(input: {
         runId: request.runId,
         messageId: request.messageId,
         originalText: text,
+        originalModelSelection: modelSelection,
         existingAttachments: request.attachments,
         context,
       },

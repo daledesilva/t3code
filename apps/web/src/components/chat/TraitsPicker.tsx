@@ -98,12 +98,14 @@ type TraitsPersistence =
   | {
       threadRef?: ScopedThreadRef;
       draftId?: DraftId;
+      persistSticky?: boolean | undefined;
       /** Runs after a change is written to the draft. */
       onDraftModelOptionsChange?: () => void;
       onModelOptionsChange?: never;
     }
   | {
       threadRef?: undefined;
+      persistSticky?: never;
       onDraftModelOptionsChange?: never;
       onModelOptionsChange: (nextOptions: ProviderOptions | undefined) => void;
     };
@@ -339,7 +341,7 @@ export function useTraitsSelection({
     setProviderModelOptions(threadTarget, provider, nextOptions, {
       ...(instanceId ? { instanceId } : {}),
       model,
-      persistSticky: true,
+      persistSticky: persistence.persistSticky ?? true,
     });
     persistence.onDraftModelOptionsChange?.();
   };

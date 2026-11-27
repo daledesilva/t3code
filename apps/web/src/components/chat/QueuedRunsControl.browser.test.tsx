@@ -22,6 +22,8 @@ import { page } from "vite-plus/test/browser";
 
 const state = vi.hoisted(() => ({
   threadState: null as unknown as Atom.Writable<AsyncResult.AsyncResult<EnvironmentThreadState>>,
+  providers: null as unknown as Atom.Writable<ReadonlyArray<unknown>>,
+  settings: null as unknown as Atom.Writable<unknown>,
   workflow: null as unknown,
   commandResult: undefined as unknown,
   commands: vi.fn<(value: unknown) => Promise<unknown>>(async () => undefined),
@@ -53,6 +55,21 @@ vi.mock(import("../../state/query"), async (importOriginal) => ({
     data: { tasks: [{ id: "task:webhook", title: "PR dispatcher" }] },
   })) as never,
 }));
+
+vi.mock(import("../../state/server"), async (importOriginal) => {
+  const actual = await importOriginal();
+  const { Atom } = await import("effect/reactivity");
+  state.providers = Atom.make<ReadonlyArray<unknown>>([]).pipe(Atom.keepAlive);
+  state.settings = Atom.make<unknown>(null).pipe(Atom.keepAlive);
+  return {
+    ...actual,
+    serverEnvironment: {
+      ...actual.serverEnvironment,
+      providersValueAtom: () => state.providers,
+      settingsValueAtom: () => state.settings,
+    } as never,
+  };
+});
 
 // The thread detail atoms are real, fed by one state atom the test writes.
 vi.mock(import("../../state/threads"), async (importOriginal) => {
@@ -463,4 +480,158 @@ it("tells the user why Send now was rejected", async () => {
 
   await page.getByRole("button", { name: "Send now" }).click();
   await vi.waitFor(() => expect(page.getByText(reason).element()).toBeVisible());
+});
+
+it("shows minimal top-left model diff badges and context implications only when relevant", async () => {
+  setup();
+  const { ProviderInstanceId } = await import("@t3tools/contracts");
+  const codex = ProviderInstanceId.make("codex");
+  const claude = ProviderInstanceId.make("claudeAgent");
+  const base = makeThreadProjectionFixture();
+  const registry = AtomRegistry.make();
+  await using stack = new AsyncDisposableStack();
+  stack.defer(() => registry.dispose());
+  registry.set(
+    state.threadState,
+    AsyncResult.success<EnvironmentThreadState>({
+      ...EMPTY_ENVIRONMENT_THREAD_STATE,
+      data: Option.some({
+        ...base,
+        thread: {
+          ...base.thread,
+          modelSelection: { instanceId: codex, model: "gpt-5.4" },
+        },
+        runs: [
+          {
+            id: "run:active" as never,
+            threadId: base.thread.id,
+            ordinal: 1,
+            providerInstanceId: codex,
+            modelSelection: { instanceId: codex, model: "gpt-5.4" },
+            providerThreadId: null,
+            userMessageId: MessageId.make("message:active"),
+            rootNodeId: null,
+            activeAttemptId: null,
+            status: "running",
+            queuePosition: null,
+            requestedAt: DateTime.makeUnsafe("2026-10-27T12:00:00.000Z"),
+            startedAt: DateTime.makeUnsafe("2026-10-27T12:00:00.000Z"),
+            completedAt: null,
+            checkpointId: null,
+            contextHandoffId: null,
+          },
+        ],
+        providerThreads: [],
+      }),
+    }),
+  );
+  registry.set(state.providers, [
+    {
+      instanceId: codex,
+      driver: "codex",
+      displayName: "Codex",
+      enabled: true,
+      models: [
+        {
+          slug: "gpt-5.4",
+          name: "GPT-5.4",
+          isCustom: false,
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "reasoningEffort",
+                label: "Reasoning effort",
+                type: "select",
+                role: "reasoning",
+                options: [
+                  { id: "medium", label: "Medium", isDefault: true },
+                  { id: "high", label: "High" },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      instanceId: claude,
+      driver: "claudeAgent",
+      displayName: "Claude",
+      enabled: true,
+      models: [
+        {
+          slug: "claude-opus-4-6",
+          name: "Claude Opus 4.6",
+          shortName: "Opus 4.6",
+          isCustom: false,
+          capabilities: null,
+        },
+      ],
+    },
+  ]);
+  state.workflow = {
+    activeRun: { id: "run:active" },
+    canPromoteToSteer: true,
+    queuedRuns: [
+      {
+        run: {
+          id: "run:effort-only",
+          userMessageId: "message:effort-only",
+          modelSelection: {
+            instanceId: codex,
+            model: "gpt-5.4",
+            options: [{ id: "reasoningEffort", value: "high" }],
+          },
+        },
+        text: "Think harder",
+        attachments: [],
+      },
+      {
+        run: {
+          id: "run:handoff",
+          userMessageId: "message:handoff",
+          modelSelection: { instanceId: claude, model: "claude-opus-4-6" },
+        },
+        text: "Switch to Claude",
+        attachments: [],
+      },
+    ],
+  };
+  const onEditQueuedRun = vi.fn();
+  await using screen = await renderUi(
+    <RegistryContext.Provider value={registry}>
+      <QueuedRunsControl {...baseProps} onEditQueuedRun={onEditQueuedRun} />
+    </RegistryContext.Provider>,
+  );
+
+  // First queued item changed only thinking level: shows just "High" and no context info badge.
+  const badges = screen.container.querySelectorAll('[data-slot="queued-model-badge"]');
+  expect(badges).toHaveLength(2);
+  expect(badges[0]?.textContent).toBe("High");
+  expect(badges[1]?.textContent).toContain("Opus 4.6");
+
+  // Only the cross-provider handoff item renders the hover-only Context chip.
+  const infoChips = screen.container.querySelectorAll('[data-slot="queued-context-info"]');
+  expect(infoChips).toHaveLength(1);
+  expect(infoChips[0]?.textContent).toContain("Context");
+
+  // Hovering the Context chip shows the context implications tooltip without triggering edit mode.
+  const infoChip = page.getByLabelText("Context implications", { exact: true });
+  await infoChip.hover();
+  await expect.element(page.getByText("Context handoff", { exact: true })).toBeVisible();
+  await expect
+    .element(
+      page.getByText(/Will summarize the conversation up to this point to hand off to Claude/),
+    )
+    .toBeVisible();
+  expect(onEditQueuedRun).not.toHaveBeenCalled();
+
+  // Clicking the bubble passes its modelSelection into edit mode.
+  await page.getByText("Switch to Claude", { exact: true }).click();
+  expect(onEditQueuedRun).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      runId: "run:handoff",
+      modelSelection: { instanceId: claude, model: "claude-opus-4-6" },
+    }),
+  );
 });

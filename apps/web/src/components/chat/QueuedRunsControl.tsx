@@ -48,6 +48,7 @@ import {
   ArrowUpIcon,
   CalendarClockIcon,
   ChevronDownIcon,
+  CircleStopIcon,
   Clock3Icon,
   MessagesSquareIcon,
   LinkIcon,
@@ -59,6 +60,7 @@ import { msg, T, useGT, useMessages } from "gt-react";
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import {
   Children,
+  Fragment,
   useId,
   useImperativeHandle,
   useRef,
@@ -90,6 +92,7 @@ import { MessageCopyButton } from "./MessageCopyButton";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { TimelineRowTimestamp } from "./TimelineRowParts";
+import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import { FoldedMessageHeader, useScheduledTaskTitle } from "./TimelineUserMessageRow";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 
@@ -155,6 +158,7 @@ export function QueuedRunsControl({
   const cancel = useAtomCommand(threadEnvironment.cancelQueuedRun);
   const reorder = useAtomCommand(threadEnvironment.reorderQueuedRun);
   const merge = useAtomCommand(threadEnvironment.mergeQueuedRuns);
+  const hold = useAtomCommand(threadEnvironment.holdQueuedRun);
   const sensors = useSensors(
     // A click stays a click. Moving the pointer starts the reorder.
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -197,6 +201,7 @@ export function QueuedRunsControl({
       messageId: run.userMessageId,
       modelSelection: run.modelSelection,
       selectionDiff: selectionDiffs[serverIndex] ?? null,
+      stopsBefore: run.queueHoldReasons?.includes("stop_before") === true,
       freshContext: run.freshContext === true,
       serverIndex,
       text,
@@ -220,6 +225,7 @@ export function QueuedRunsControl({
       messageId: null,
       modelSelection: undefined,
       selectionDiff: null,
+      stopsBefore: false,
       freshContext: false,
       serverIndex: null,
       text: message.text,
@@ -325,6 +331,27 @@ export function QueuedRunsControl({
       input: { threadId: props.threadId, targetRunId, sourceRunId },
     });
     setBusyRunId(null);
+  };
+
+  const setStopBeforeQueuedRun = async (queuedRunId: RunId, held: boolean) => {
+    setBusyRunId(queuedRunId);
+    const result = await hold({
+      environmentId: props.environmentId,
+      input: {
+        threadId: props.threadId,
+        runId: queuedRunId,
+        reason: "stop_before",
+        held,
+      },
+    });
+    setBusyRunId((current) => (current === queuedRunId ? null : current));
+    if (result?._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      toastManager.add({
+        type: "error",
+        title: held ? gt("Could not stop queue here") : gt("Could not cancel queue stop"),
+        description: thrownErrorMessage(squashAtomCommandFailure(result), messages),
+      });
+    }
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -490,56 +517,115 @@ export function QueuedRunsControl({
                   </TooltipPopup>
                 </Tooltip>
               ) : null;
-              return (
-                <SortableQueuedMessageItem
-                  key={item.key}
-                  id={item.key}
-                  position={position}
-                  total={items.length}
-                  isEditing={isEditing}
-                  canReorder={canReorder}
-                  disabled={item.runId === null || busyRunId !== null}
-                >
-                  {({ reorder }) => (
-                    <QueuedMessage
-                      environmentId={props.environmentId}
-                      providers={providers}
-                      selectionDiff={item.selectionDiff}
-                      message={item.message}
-                      previewText={previewText}
-                      thumbnails={item.thumbnails}
-                      isEditing={isEditing}
-                      timestampFormat={props.timestampFormat}
-                      onOpenThread={props.onOpenThread}
-                      onEdit={editQueuedMessage}
-                      onImageExpand={props.onImageExpand}
-                      editLabel={
-                        props.editBlockedReason ??
-                        (item.serverIndex === queued.length - 1 && props.editShortcutLabel
-                          ? gt("Edit in the composer ({shortcut})", {
-                              shortcut: props.editShortcutLabel,
-                            })
-                          : gt("Edit in the composer"))
-                      }
-                      leadingControl={sendNowControl}
-                      reorder={reorder}
-                      footerLeading={mergeControl}
-                      removeControl={removeControl}
+              const canStopAfter =
+                nextItem !== undefined &&
+                item.runId !== null &&
+                nextItem.runId !== null &&
+                !nextItem.stopsBefore;
+              const stopAfterControl = canStopAfter ? (
+                <Tooltip>
+                  <TooltipTrigger render={<span className="flex shrink-0" />}>
+                    <Button
+                      size="xs"
+                      variant="ghost-muted"
+                      disabled={busyRunId !== null}
+                      onClick={() => {
+                        if (nextItem.runId !== null) {
+                          void setStopBeforeQueuedRun(nextItem.runId, true);
+                        }
+                      }}
                     >
-                      {item.pending ? (
-                        <span className="flex items-center gap-1 px-1">
-                          <Clock3Icon aria-hidden className="size-3" />
-                          <T>Saving</T>
-                        </span>
-                      ) : null}
-                      {isEditing ? (
-                        <span className="px-1 text-foreground">
-                          <T>Editing in the composer</T>
-                        </span>
-                      ) : null}
-                    </QueuedMessage>
-                  )}
-                </SortableQueuedMessageItem>
+                      <CircleStopIcon />
+                      <T>Stop After</T>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipPopup>
+                    <T>Stop the queue after this message</T>
+                  </TooltipPopup>
+                </Tooltip>
+              ) : null;
+              const stoppedAtDivider = item.stopsBefore && position === 0 && activeRun === null;
+              return (
+                <Fragment key={item.key}>
+                  {item.stopsBefore && item.runId !== null ? (
+                    <li role="presentation" className="w-full" data-slot="queue-stop-divider">
+                      {stoppedAtDivider ? (
+                        <TimelineSystemDivider
+                          label={gt("Queue interrupted")}
+                          detail={gt("Stopped by user")}
+                          icon={CircleStopIcon}
+                        />
+                      ) : (
+                        <TimelineSystemDivider
+                          label={gt("Stops here")}
+                          icon={CircleStopIcon}
+                          detail={
+                            <InlineButton
+                              tone="muted"
+                              disabled={busyRunId !== null}
+                              onClick={() => {
+                                if (item.runId !== null) {
+                                  void setStopBeforeQueuedRun(item.runId, false);
+                                }
+                              }}
+                            >
+                              <T>Cancel</T>
+                            </InlineButton>
+                          }
+                        />
+                      )}
+                    </li>
+                  ) : null}
+                  <SortableQueuedMessageItem
+                    id={item.key}
+                    position={position}
+                    total={items.length}
+                    isEditing={isEditing}
+                    canReorder={canReorder}
+                    disabled={item.runId === null || busyRunId !== null}
+                  >
+                    {({ reorder }) => (
+                      <QueuedMessage
+                        environmentId={props.environmentId}
+                        providers={providers}
+                        selectionDiff={item.selectionDiff}
+                        message={item.message}
+                        previewText={previewText}
+                        thumbnails={item.thumbnails}
+                        isEditing={isEditing}
+                        timestampFormat={props.timestampFormat}
+                        onOpenThread={props.onOpenThread}
+                        onEdit={editQueuedMessage}
+                        onImageExpand={props.onImageExpand}
+                        editLabel={
+                          props.editBlockedReason ??
+                          (item.serverIndex === queued.length - 1 && props.editShortcutLabel
+                            ? gt("Edit in the composer ({shortcut})", {
+                                shortcut: props.editShortcutLabel,
+                              })
+                            : gt("Edit in the composer"))
+                        }
+                        leadingControl={sendNowControl}
+                        reorder={reorder}
+                        footerLeading={mergeControl}
+                        stopAfterControl={stopAfterControl}
+                        removeControl={removeControl}
+                      >
+                        {item.pending ? (
+                          <span className="flex items-center gap-1 px-1">
+                            <Clock3Icon aria-hidden className="size-3" />
+                            <T>Saving</T>
+                          </span>
+                        ) : null}
+                        {isEditing ? (
+                          <span className="px-1 text-foreground">
+                            <T>Editing in the composer</T>
+                          </span>
+                        ) : null}
+                      </QueuedMessage>
+                    )}
+                  </SortableQueuedMessageItem>
+                </Fragment>
               );
             })}
           </ol>
@@ -681,6 +767,7 @@ function QueuedMessage(props: {
     readonly listeners: ReturnType<typeof useSortable>["listeners"];
   } | null;
   readonly footerLeading?: ReactNode;
+  readonly stopAfterControl?: ReactNode;
   readonly removeControl?: ReactNode;
   readonly children: ReactNode;
   readonly onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -882,6 +969,7 @@ function QueuedMessage(props: {
           ) : null}
         </div>
         {props.footerLeading ||
+        props.stopAfterControl ||
         props.message ||
         props.previewText ||
         props.removeControl ||
@@ -898,6 +986,7 @@ function QueuedMessage(props: {
               <div className="flex w-full items-center justify-end gap-1.5 pt-1 text-xs text-muted-foreground">
                 <div className="flex min-w-0 items-center justify-end">
                   {props.footerLeading ||
+                  props.stopAfterControl ||
                   props.message ||
                   props.previewText ||
                   props.removeControl ? (
@@ -962,6 +1051,12 @@ function QueuedMessage(props: {
                         <>
                           <MetaDot />
                           {props.footerLeading}
+                        </>
+                      ) : null}
+                      {props.stopAfterControl ? (
+                        <>
+                          <MetaDot />
+                          {props.stopAfterControl}
                         </>
                       ) : null}
                       {props.removeControl ? (

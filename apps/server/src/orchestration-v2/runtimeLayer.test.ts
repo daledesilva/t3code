@@ -11745,6 +11745,109 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         model: "gpt-5.4-mini",
         options: [{ id: "reasoningEffort", value: "high" }],
       });
+
+      // Queue two follow-up runs and place a stop_before barrier on the second one.
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("runtime-layer-stop-before-q1"),
+        threadId,
+        messageId: MessageId.make("runtime-layer-stop-before-msg-1"),
+        text: "Run before stop",
+        attachments: [],
+        modelSelection,
+        createdBy: "user",
+        creationSource: "web",
+        dispatchMode: { type: "queue_after_active" },
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("runtime-layer-stop-before-q2"),
+        threadId,
+        messageId: MessageId.make("runtime-layer-stop-before-msg-2"),
+        text: "Wait after stop",
+        attachments: [],
+        modelSelection,
+        createdBy: "user",
+        creationSource: "web",
+        dispatchMode: { type: "queue_after_active" },
+      });
+      const beforeStop = yield* orchestrator.getThreadProjection(threadId);
+      const runBeforeStop = beforeStop.runs.find(
+        (run) => run.userMessageId === MessageId.make("runtime-layer-stop-before-msg-1"),
+      );
+      const runAfterStop = beforeStop.runs.find(
+        (run) => run.userMessageId === MessageId.make("runtime-layer-stop-before-msg-2"),
+      );
+      assert.isDefined(runBeforeStop);
+      assert.isDefined(runAfterStop);
+      assert.isDefined(editedQueuedRun);
+
+      yield* orchestrator.dispatch({
+        type: "queued-run.hold",
+        commandId: CommandId.make("runtime-layer-stop-before-set"),
+        threadId,
+        runId: runAfterStop.id,
+        reason: "stop_before",
+        held: true,
+      });
+
+      // Completing the active run starts runBeforeStop, then completing runBeforeStop stops before runAfterStop.
+      yield* events.write({
+        events: [
+          {
+            id: EventId.make(`${threadId}:edited-done`),
+            type: "run.updated",
+            threadId,
+            runId: editedQueuedRun.id,
+            occurredAt: now,
+            payload: { ...editedQueuedRun, status: "completed", completedAt: now },
+          },
+        ],
+      });
+      yield* orchestrator.resumeQueuedRuns;
+
+      const afterEditedDone = yield* orchestrator.getThreadProjection(threadId);
+      const startedBeforeStop = afterEditedDone.runs.find((run) => run.id === runBeforeStop.id);
+      assert.equal(startedBeforeStop?.status, "starting");
+      assert.isDefined(startedBeforeStop);
+
+      yield* events.write({
+        events: [
+          {
+            id: EventId.make(`${threadId}:before-stop-done`),
+            type: "run.updated",
+            threadId,
+            runId: startedBeforeStop.id,
+            occurredAt: now,
+            payload: { ...startedBeforeStop, status: "completed", completedAt: now },
+          },
+        ],
+      });
+      yield* orchestrator.resumeQueuedRuns;
+
+      const stoppedAtBarrier = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(
+        stoppedAtBarrier.runs.find((run) => run.id === runAfterStop.id)?.status,
+        "queued",
+        "queue must stop before a run held with stop_before",
+      );
+
+      // Cancelling the stop_before hold resumes the queued run immediately when idle.
+      yield* orchestrator.dispatch({
+        type: "queued-run.hold",
+        commandId: CommandId.make("runtime-layer-stop-before-clear"),
+        threadId,
+        runId: runAfterStop.id,
+        reason: "stop_before",
+        held: false,
+      });
+
+      const afterBarrierCleared = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(
+        afterBarrierCleared.runs.find((run) => run.id === runAfterStop.id)?.status,
+        "starting",
+        "clearing stop_before starts the waiting run when the thread is idle",
+      );
     }),
   );
 });

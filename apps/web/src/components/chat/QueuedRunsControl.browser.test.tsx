@@ -267,6 +267,7 @@ it("previews assistant quotes as readable text and preserves the citation when e
   await expect
     .element(page.getByRole("button", { name: "Copy prompt link", exact: true }).first())
     .toBeInTheDocument();
+  await page.getByRole("button", { name: "Edit queued message", exact: true }).first().hover();
   await page.getByRole("button", { name: "Merge", exact: true }).first().click();
   expect(state.commands).toHaveBeenCalledExactlyOnceWith({
     environmentId: "environment:test",
@@ -347,12 +348,16 @@ it("shows who sent a queued message and folds automation and agent prompts", asy
   await expect.element(page.getByText(/Follow the runbook/)).toBeVisible();
   await expect.element(page.getByRole("link", { name: "Open automation" })).toBeInTheDocument();
 
-  await expect.element(page.getByRole("button", { name: /Release lead/ })).toBeVisible();
-  await page.getByRole("button", { name: "Open thread" }).nth(0).click({ force: true });
+  const releaseLead = page.getByRole("button", { name: /Release lead/ });
+  await expect.element(releaseLead).toBeVisible();
+  await releaseLead.hover();
+  await page.getByRole("button", { name: "Open thread" }).nth(0).click();
   expect(onOpenThread).toHaveBeenCalledExactlyOnceWith("thread:lead", "environment:test");
   // A sender in a connected linked environment keeps the title it sent and opens there.
-  await expect.element(page.getByRole("button", { name: /Title when sent/ })).toBeVisible();
-  await page.getByRole("button", { name: "Open thread" }).nth(1).click({ force: true });
+  const linkedSender = page.getByRole("button", { name: /Title when sent/ });
+  await expect.element(linkedSender).toBeVisible();
+  await linkedSender.hover();
+  await page.getByRole("button", { name: "Open thread" }).nth(1).click();
   expect(onOpenThread).toHaveBeenLastCalledWith("thread:linked-lead", "environment:linked");
 
   await expect.element(page.getByText("Sent by T3 Code")).toBeVisible();
@@ -634,4 +639,126 @@ it("shows minimal top-left model diff badges and context implications only when 
       modelSelection: { instanceId: claude, model: "claude-opus-4-6" },
     }),
   );
+});
+
+it("adds and cancels a Stops here divider between queued items", async () => {
+  setup();
+  state.workflow = {
+    activeRun: { id: "run:active" },
+    canPromoteToSteer: true,
+    queuedRuns: [
+      {
+        run: { id: "run:first", userMessageId: "message:first" },
+        text: "First queued prompt",
+        attachments: [],
+      },
+      {
+        run: { id: "run:second", userMessageId: "message:second" },
+        text: "Second queued prompt",
+        attachments: [],
+      },
+    ],
+  };
+  const registry = AtomRegistry.make();
+  await using stack = new AsyncDisposableStack();
+  stack.defer(() => registry.dispose());
+  const screen = await renderUi(
+    <RegistryContext.Provider value={registry}>
+      <QueuedRunsControl {...baseProps} />
+    </RegistryContext.Provider>,
+  );
+  stack.use(screen);
+
+  // First item shows Stop After (between Merge and Remove); last item does not.
+  const stopAfterButtons = screen.container.querySelectorAll("button");
+  const stopAfter = Array.from(stopAfterButtons).filter(
+    (button) => button.textContent?.trim() === "Stop After",
+  );
+  expect(stopAfter).toHaveLength(1);
+  await page.getByText("First queued prompt", { exact: true }).hover();
+  await page.getByRole("button", { name: "Stop After", exact: true }).click();
+  expect(state.commands).toHaveBeenCalledWith({
+    environmentId: baseProps.environmentId,
+    input: {
+      threadId: baseProps.threadId,
+      runId: "run:second",
+      reason: "stop_before",
+      held: true,
+    },
+  });
+
+  // When the second item carries stop_before, render the Stops here divider with Cancel.
+  state.commands.mockClear();
+  state.workflow = {
+    activeRun: { id: "run:active" },
+    canPromoteToSteer: true,
+    queuedRuns: [
+      {
+        run: { id: "run:first", userMessageId: "message:first" },
+        text: "First queued prompt",
+        attachments: [],
+      },
+      {
+        run: {
+          id: "run:second",
+          userMessageId: "message:second",
+          queueHeld: true,
+          queueHoldReasons: ["stop_before"],
+        },
+        text: "Second queued prompt",
+        attachments: [],
+      },
+    ],
+  };
+  await screen.rerender(
+    <RegistryContext.Provider value={registry}>
+      <QueuedRunsControl {...baseProps} />
+    </RegistryContext.Provider>,
+  );
+
+  await expect.element(page.getByText("Stops here", { exact: true })).toBeVisible();
+  expect(
+    Array.from(screen.container.querySelectorAll("button")).filter(
+      (button) => button.textContent?.trim() === "Stop After",
+    ),
+  ).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(state.commands).toHaveBeenCalledWith({
+    environmentId: baseProps.environmentId,
+    input: {
+      threadId: baseProps.threadId,
+      runId: "run:second",
+      reason: "stop_before",
+      held: false,
+    },
+  });
+
+  // Once earlier items finish and the thread stops at the divider, show Queue interrupted · Stopped by user.
+  state.workflow = {
+    activeRun: null,
+    canSendNow: true,
+    canPromoteToSteer: false,
+    queuedRuns: [
+      {
+        run: {
+          id: "run:second",
+          userMessageId: "message:second",
+          queueHeld: true,
+          queueHoldReasons: ["stop_before"],
+        },
+        text: "Second queued prompt",
+        attachments: [],
+      },
+    ],
+  };
+  await screen.rerender(
+    <RegistryContext.Provider value={registry}>
+      <QueuedRunsControl {...baseProps} />
+    </RegistryContext.Provider>,
+  );
+
+  await expect.element(page.getByText("Queue interrupted", { exact: true })).toBeVisible();
+  await expect.element(page.getByText(/Stopped by user/)).toBeVisible();
+  await expect.element(page.getByText("Stops here", { exact: true })).not.toBeInTheDocument();
 });

@@ -1086,7 +1086,7 @@ function nextQueuedRun(
   projection: Pick<OrchestrationV2ThreadProjection, "runs" | "messages">,
 ): OrchestrationV2Run | undefined {
   for (const run of queuedRunsInDeliveryOrder(projection)) {
-    if (hasRunHoldReason(run, "edit")) {
+    if (hasRunHoldReason(run, "edit") || hasRunHoldReason(run, "stop_before")) {
       return undefined;
     }
     if (run.queueHeld !== true) {
@@ -16207,7 +16207,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           const updatedRun =
             selectedRunId !== undefined && run.id === selectedRunId
               ? withRunHoldReasons(run, [])
-              : removeRunHoldReasons(run, ["stop", "failure", "worktree"]);
+              : command.type === "queue.resume" && nextRun !== undefined && run.id === nextRun.id
+                ? removeRunHoldReasons(run, ["stop", "failure", "worktree", "stop_before"])
+                : removeRunHoldReasons(run, ["stop", "failure", "worktree"]);
           yield* emit(
             events,
             command,

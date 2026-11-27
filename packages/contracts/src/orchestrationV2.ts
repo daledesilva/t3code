@@ -771,6 +771,7 @@ export const OrchestrationV2QueueHoldReason = Schema.Literals([
   "worktree",
   "start_after",
   "edit",
+  "stop_before",
 ]);
 export type OrchestrationV2QueueHoldReason = typeof OrchestrationV2QueueHoldReason.Type;
 

@@ -57,7 +57,15 @@ import {
 import * as DateTime from "effect/DateTime";
 import { msg, T, useGT, useMessages } from "gt-react";
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
-import { useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
+import {
+  Children,
+  useId,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactNode,
+  type Ref,
+} from "react";
 
 import { useAssetUrls } from "../../assets/assetUrls";
 import {
@@ -715,6 +723,7 @@ function QueuedMessage(props: {
   const promptLink = promptLinkFor(props.previewText);
   const bubbleIsButton = props.onEdit !== null && fold === null;
   const { onKeyDown: reorderKeyDown, ...bubbleReorderListeners } = props.reorder?.listeners ?? {};
+  const hasPersistentFooter = Children.toArray(props.children).length > 0;
 
   return (
     <>
@@ -726,7 +735,7 @@ function QueuedMessage(props: {
       {presentation?.guestName === undefined ? null : (
         <GuestMessageName name={presentation.guestName} />
       )}
-      <div className="flex w-full flex-col items-end gap-1">
+      <div className="flex w-full flex-col items-end">
         <div
           className={cn(
             "relative flex w-full items-center justify-end gap-1.5",
@@ -872,74 +881,103 @@ function QueuedMessage(props: {
             </div>
           ) : null}
         </div>
-        <div className="flex w-full items-center justify-end gap-1.5 text-xs text-muted-foreground">
-          <div className="flex min-w-0 items-center justify-end">
-            {props.footerLeading || props.message || props.previewText || props.removeControl ? (
-              <span className="flex items-center opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/queued:opacity-100">
-                <span className="flex items-center gap-1">
-                  {attribution === "agent" &&
-                  senderRef &&
-                  // Only an environment this client is connected to can open the sender's thread there.
-                  (props.message?.linkedSender === undefined ||
-                    linkedSenderEnvironment !== null) ? (
-                    <InlineButton
-                      tone="muted"
-                      onClick={() =>
-                        props.onOpenThread(senderRef.threadId, senderRef.environmentId)
-                      }
+        {props.footerLeading ||
+        props.message ||
+        props.previewText ||
+        props.removeControl ||
+        hasPersistentFooter ? (
+          <div
+            className={cn(
+              "grid w-full transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none",
+              hasPersistentFooter
+                ? "grid-rows-[1fr] opacity-100"
+                : "grid-rows-[0fr] opacity-0 pointer-coarse:grid-rows-[1fr] pointer-coarse:opacity-100 focus-within:grid-rows-[1fr] focus-within:opacity-100 group-hover/queued:grid-rows-[1fr] group-hover/queued:opacity-100",
+            )}
+          >
+            <div className="min-h-0 overflow-hidden">
+              <div className="flex w-full items-center justify-end gap-1.5 pt-1 text-xs text-muted-foreground">
+                <div className="flex min-w-0 items-center justify-end">
+                  {props.footerLeading ||
+                  props.message ||
+                  props.previewText ||
+                  props.removeControl ? (
+                    <span
+                      className={cn(
+                        "flex items-center",
+                        hasPersistentFooter &&
+                          "opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/queued:opacity-100",
+                      )}
                     >
-                      <T>Open thread</T>
-                    </InlineButton>
+                      <span className="flex items-center gap-1">
+                        {attribution === "agent" &&
+                        senderRef &&
+                        // Only an environment this client is connected to can open the sender's thread there.
+                        (props.message?.linkedSender === undefined ||
+                          linkedSenderEnvironment !== null) ? (
+                          <InlineButton
+                            tone="muted"
+                            onClick={() =>
+                              props.onOpenThread(senderRef.threadId, senderRef.environmentId)
+                            }
+                          >
+                            <T>Open thread</T>
+                          </InlineButton>
+                        ) : null}
+                        {scheduledTaskId ? (
+                          <InlineButton
+                            tone="muted"
+                            render={
+                              <Link
+                                to="/settings/scheduled-tasks"
+                                search={{
+                                  environmentId: props.environmentId,
+                                  taskId: scheduledTaskId,
+                                }}
+                              />
+                            }
+                          >
+                            <T>Open automation</T>
+                          </InlineButton>
+                        ) : null}
+                        {props.message ? (
+                          <TimelineRowTimestamp
+                            createdAt={DateTime.formatIso(props.message.createdAt)}
+                            timestampFormat={props.timestampFormat}
+                            alwaysVisible
+                          />
+                        ) : null}
+                        {props.previewText ? (
+                          <MessageCopyButton text={props.previewText} variant="ghost" />
+                        ) : null}
+                        {promptLink !== null ? (
+                          <MessageCopyButton
+                            text={promptLink}
+                            label={gt("Copy prompt link")}
+                            icon={LinkIcon}
+                            variant="ghost"
+                          />
+                        ) : null}
+                      </span>
+                      {props.footerLeading ? (
+                        <>
+                          <MetaDot />
+                          {props.footerLeading}
+                        </>
+                      ) : null}
+                      {props.removeControl ? (
+                        <>
+                          <MetaDot />
+                          {props.removeControl}
+                        </>
+                      ) : null}
+                    </span>
                   ) : null}
-                  {scheduledTaskId ? (
-                    <InlineButton
-                      tone="muted"
-                      render={
-                        <Link
-                          to="/settings/scheduled-tasks"
-                          search={{ environmentId: props.environmentId, taskId: scheduledTaskId }}
-                        />
-                      }
-                    >
-                      <T>Open automation</T>
-                    </InlineButton>
-                  ) : null}
-                  {props.message ? (
-                    <TimelineRowTimestamp
-                      createdAt={DateTime.formatIso(props.message.createdAt)}
-                      timestampFormat={props.timestampFormat}
-                      alwaysVisible
-                    />
-                  ) : null}
-                  {props.previewText ? (
-                    <MessageCopyButton text={props.previewText} variant="ghost" />
-                  ) : null}
-                  {promptLink !== null ? (
-                    <MessageCopyButton
-                      text={promptLink}
-                      label={gt("Copy prompt link")}
-                      icon={LinkIcon}
-                      variant="ghost"
-                    />
-                  ) : null}
-                </span>
-                {props.footerLeading ? (
-                  <>
-                    <MetaDot />
-                    {props.footerLeading}
-                  </>
-                ) : null}
-                {props.removeControl ? (
-                  <>
-                    <MetaDot />
-                    {props.removeControl}
-                  </>
-                ) : null}
-              </span>
-            ) : null}
-            {props.children}
+                  {props.children}
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
     </>
   );

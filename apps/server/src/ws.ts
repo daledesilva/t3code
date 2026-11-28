@@ -120,6 +120,7 @@ import {
 import { RpcGroup, RpcSerialization, RpcServer } from "effect/rpc";
 
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
+import { discoverProviderMcpServers } from "./provider/ProviderMcpDiscovery.ts";
 import * as NativeChildWorkQuery from "./orchestration-v2/NativeChildWorkQuery.ts";
 import * as ServerConfig from "./config.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
@@ -2711,6 +2712,21 @@ export const layerWsRpc = (
             limits: yield* providerRegistry.runtimeModeLimits({
               instanceId: input.instanceId,
               scanCwd: yield* projectService.workspaceScanDirectory(input.cwd),
+            }),
+          };
+        }),
+        [WS_METHODS.serverGetProviderMcpServers]: Effect.fnUntraced(function* (input) {
+          const providers = yield* providerRegistry.getProviders;
+          const provider =
+            providers.find((candidate) => candidate.instanceId === input.instanceId) ?? null;
+          const scanCwd =
+            input.cwd !== undefined
+              ? yield* projectService.workspaceScanDirectory(input.cwd)
+              : undefined;
+          return {
+            servers: yield* discoverProviderMcpServers({
+              provider,
+              ...(scanCwd !== undefined ? { cwd: scanCwd } : {}),
             }),
           };
         }),

@@ -386,6 +386,8 @@ import {
   ServerProviderUpdatedPayload,
   ProviderRuntimeModeLimitsInput,
   ProviderRuntimeModeLimitsResult,
+  ProviderMcpServersInput,
+  ProviderMcpServersResult,
   ServerSelfUpdateError,
   ServerNpmRelease,
   ServerNpmReleaseError,
@@ -595,6 +597,7 @@ export const WS_METHODS = {
   serverGetNpmRelease: "server.getNpmRelease",
   serverRefreshProviders: "server.refreshProviders",
   serverGetProviderRuntimeModeLimits: "server.getProviderRuntimeModeLimits",
+  serverGetProviderMcpServers: "server.getProviderMcpServers",
   serverUpdateProvider: "server.updateProvider",
   serverUpdateServer: "server.updateServer",
   serverUpdateServerWithProgress: "server.updateServerWithProgress",
@@ -830,6 +833,12 @@ const WsServerGetProviderRuntimeModeLimitsRpc = Rpc.make(
     error: EnvironmentAuthorizationError,
   },
 );
+
+const WsServerGetProviderMcpServersRpc = Rpc.make(WS_METHODS.serverGetProviderMcpServers, {
+  payload: ProviderMcpServersInput,
+  success: ProviderMcpServersResult,
+  error: EnvironmentAuthorizationError,
+});
 
 const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvider, {
   payload: ServerProviderUpdateInput,
@@ -2571,6 +2580,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerDeleteAcpRegistrySessionRpc,
   WsServerListAcpRegistryProvidersRpc,
   WsServerGetProviderRuntimeModeLimitsRpc,
+  WsServerGetProviderMcpServersRpc,
   WsServerSetAcpRegistryProviderRpc,
   WsServerDisableAcpRegistryProviderRpc,
   WsServerLogoutAcpRegistryRpc,

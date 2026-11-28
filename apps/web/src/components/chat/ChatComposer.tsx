@@ -113,7 +113,6 @@ import {
   type ComposerImageAttachment,
   type DraftId,
   composerFileNeedsReattach,
-  composerDraftHasUserContent,
   composerTargetKey,
   readComposerDraftPrompt,
   resolveLiveComposerDraftTarget,
@@ -257,7 +256,7 @@ import { observeResize } from "~/lib/observeResize";
 const isEnvironmentRequestInvalidError = Schema.is(EnvironmentRequestInvalidError);
 import { toastManager } from "../ui/toast";
 import { m as resolveMessage } from "../../i18n/messages";
-import { BuildingIcon, PlayIcon, ReplyIcon } from "lucide-react";
+import { BuildingIcon, ReplyIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { assistantCitationLabel } from "@t3tools/shared/assistantCitations";
 import { assistantCitationNavigation } from "../../lib/assistantCitationNavigation";
@@ -413,7 +412,6 @@ export interface ChatComposerProps {
   phase: SessionPhase;
   canInterrupt: boolean;
   isSendBusy: boolean;
-  canResume: boolean;
   isRevertingCheckpoint?: boolean;
   sendDisabledReason: string | null;
   isPreparingWorktree: boolean;
@@ -504,7 +502,6 @@ export interface ChatComposerProps {
       readonly sendContext: ReturnType<ChatComposerHandle["getSendContext"]>;
     },
   ) => void;
-  onResume: () => void;
   onInterrupt: () => void;
   onSelectActivePendingUserInputOption: (questionId: string, optionValue: string) => void;
   onAdvanceActivePendingUserInput: () => void;
@@ -563,7 +560,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     phase,
     canInterrupt,
     isSendBusy,
-    canResume,
     isRevertingCheckpoint = false,
     sendDisabledReason: externalSendDisabledReason,
     isPreparingWorktree,
@@ -607,7 +603,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onCompactContext,
     onSend,
     captureDetachedSend,
-    onResume,
     onInterrupt,
     onSelectActivePendingUserInputOption,
     onAdvanceActivePendingUserInput,
@@ -1353,11 +1348,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
     : null;
   const hasMessageToSend = composerSendState.hasSendableContent || messageHasPreparingImages;
-  const showResumeAction =
-    canResume &&
-    !composerDraftHasUserContent(composerDraft) &&
-    !messageHasPreparingImages &&
-    !isEditingQueuedMessage;
   const collapsedComposerPrimaryActionDisabled =
     phase === "running" ||
     isSendBusy ||
@@ -1366,14 +1356,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     noProviderAvailable ||
     projectSelectionRequired ||
     environmentUnavailable !== null ||
-    (!hasMessageToSend && !showResumeAction);
+    !hasMessageToSend;
   const collapsedComposerPrimaryActionLabel = composerSendHeld
     ? gt("Sending when ready")
-    : showResumeAction
-      ? gt("Resume thread")
-      : props.resumeCompactionTokens !== null && !props.keepFullHistory
-        ? gt("Open composer to compact and send")
-        : gt("Send message");
+    : props.resumeCompactionTokens !== null && !props.keepFullHistory
+      ? gt("Open composer to compact and send")
+      : gt("Send message");
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
 
@@ -2417,13 +2405,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         description: gt("Send again once its chip resolves."),
       });
       return false;
-    }
-    // An empty draft has nothing to send; Enter does what the Resume thread button does.
-    if (showResumeAction && !activePendingProgress && promptRef.current.trim().length === 0) {
-      event?.preventDefault();
-      if (isSendBusy || environmentUnavailable !== null) return false;
-      onResume();
-      return true;
     }
     const submission = submitComposerDraft({
       prompt: promptRef.current,
@@ -3839,16 +3820,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onPointerDown={(event) => event.preventDefault()}
                     onClick={(event) => {
                       event.stopPropagation();
-                      if (showResumeAction) onResume();
-                      else if (props.resumeCompactionTokens !== null && !props.keepFullHistory)
+                      if (props.resumeCompactionTokens !== null && !props.keepFullHistory)
                         expandMobileComposer();
                       else submitComposer();
                     }}
                   >
                     {composerSendHeld || isSendBusy ? (
                       <Spinner size="sm" aria-hidden="true" />
-                    ) : showResumeAction ? (
-                      <PlayIcon className="size-4 fill-current" aria-hidden="true" />
                     ) : (
                       <svg
                         width="16"
@@ -4055,7 +4033,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       canOperateThread={canOperateThread}
                       pendingAction={pendingPrimaryAction}
                       isRunning={false}
-                      canInterrupt={false}
                       isSendBusy={isSendBusy}
                       sendDisabledReason={primaryActionSendDisabledReason}
                       isEnvironmentUnavailable={primaryActionEnvironmentUnavailable}
@@ -4063,7 +4040,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       hasSendableContent={false}
                       preserveComposerFocusOnPointerDown
                       onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
-                      onInterrupt={handleInterruptPrimaryActionStable}
                     />
                   </div>
                 ) : null}
@@ -4121,14 +4097,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     {composerControls}
                   </div>
                   <ComposerFooterPrimaryActions
-                    // Stop state belongs to one thread; the composer stays mounted across threads.
-                    key={`${environmentId}:${activeThreadId ?? "new"}`}
                     compact={isComposerPrimaryActionsCompact}
                     canOperateThread={canOperateThread}
                     pendingAction={pendingPrimaryAction}
                     isRunning={(phase === "running" || phase === "connecting") && !draftRunsLocally}
-                    canInterrupt={canInterrupt}
-                    runId={activeThread?.runtime?.activeRunId ?? null}
                     followUpBehavior={followUpBehavior}
                     canSteer={canSteer}
                     alternateShortcutLabel={shortcutLabelForCommand(
@@ -4153,13 +4125,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isEnvironmentUnavailable={primaryActionEnvironmentUnavailable}
                     isPreparingWorktree={isPreparingWorktree}
                     hasSendableContent={hasMessageToSend || voiceInputActive}
-                    canResume={showResumeAction}
                     preserveComposerFocusOnPointerDown={isMobileViewport}
                     isEditingQueuedMessage={isEditingQueuedMessage}
                     onSubmitMessage={handleSubmitMessageStable}
-                    onResume={onResume}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
-                    onInterrupt={handleInterruptPrimaryActionStable}
                     compactBeforeSendTokens={props.resumeCompactionTokens}
                     hideCompactToggle={dictationTakesFooter}
                     keepFullHistory={props.keepFullHistory}

@@ -120,6 +120,9 @@ export interface TimelineRowActivityState {
   latestRunId: RunId | null;
   backgroundWorktreeSetup: WorktreeSetupSnapshot | null;
   liveAnswerPreview: string | null;
+  inlineStopRowId: string | null;
+  onInterrupt: (() => void) | null;
+  stopPending: boolean;
 }
 
 export const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);

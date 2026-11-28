@@ -11,7 +11,6 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   Minimize2Icon,
-  PlayIcon,
   CornerUpRightIcon,
   ListPlusIcon,
 } from "lucide-react";
@@ -45,8 +44,6 @@ interface ComposerPrimaryActionsProps {
   canOperateThread: boolean;
   pendingAction: PendingActionState | null;
   isRunning: boolean;
-  canInterrupt: boolean;
-  runId?: string | null;
   followUpBehavior?: "queue" | "steer";
   canSteer?: boolean;
   alternateShortcutLabel?: string | null;
@@ -59,13 +56,10 @@ interface ComposerPrimaryActionsProps {
   isEnvironmentUnavailable: boolean;
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
-  canResume?: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
   isEditingQueuedMessage?: boolean;
   onSubmitMessage?: MouseEventHandler<HTMLButtonElement>;
-  onResume?: () => void;
   onPreviousPendingQuestion: () => void;
-  onInterrupt: () => void;
   compactBeforeSendTokens?: number | null;
   hideCompactToggle?: boolean;
   keepFullHistory?: boolean;
@@ -106,9 +100,9 @@ const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
   event.preventDefault();
 };
 
-type StopPhase = "pending" | "timedOut" | "landed" | null;
+export type StopPhase = "pending" | "timedOut" | "landed" | null;
 
-function useStopPhase(input: {
+export function useStopPhase(input: {
   runId: string | null;
   canInterrupt: boolean;
   canOperateThread: boolean;
@@ -238,8 +232,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   canOperateThread,
   pendingAction,
   isRunning,
-  canInterrupt,
-  runId = null,
   followUpBehavior = "steer",
   canSteer = true,
   alternateShortcutLabel = null,
@@ -250,13 +242,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEnvironmentUnavailable,
   isPreparingWorktree,
   hasSendableContent,
-  canResume = false,
   preserveComposerFocusOnPointerDown = false,
   isEditingQueuedMessage = false,
   onSubmitMessage,
-  onResume,
   onPreviousPendingQuestion,
-  onInterrupt,
   compactBeforeSendTokens = null,
   hideCompactToggle = false,
   keepFullHistory = false,
@@ -264,7 +253,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
 }: ComposerPrimaryActionsProps) {
   const gt = useGT();
   const m = useMessages();
-  const [stopPhase, setStopPhase] = useStopPhase({ runId, canInterrupt, canOperateThread });
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
     : undefined;
@@ -278,31 +266,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       canSteer,
       alternateModifier: shortcutModifiers.metaKey || shortcutModifiers.ctrlKey,
     }) === "queue";
+  // Stop lives in the timeline, so an empty composer mid-run is a plain, disabled Submit.
+  const isRunningFollowUp = isRunning && hasSendableContent;
   const alternateAction = alternateComposerDispatchAction(followUpBehavior);
   const isSendDisabled = !canOperateThread || sendDisabledReason !== null;
   const stageBackdropVariant = useSidebarStageBackdropVariant(environmentIdentificationMode);
-
-  const renderStopGenerationButton = (insidePendingAction: boolean) => (
-    <StopGenerationButton
-      key="interrupt"
-      stopPhase={stopPhase}
-      canOperateThread={canOperateThread}
-      insidePendingAction={insidePendingAction}
-      preserveComposerFocusOnPointerDown={preserveComposerFocusOnPointerDown}
-      onStopRequested={() => setStopPhase("pending")}
-      onInterrupt={onInterrupt}
-    />
-  );
-
-  // Keep the clicked target at the right edge even if typing changes the primary action.
-  const withStopButton = (action: ReactNode) => (
-    <>
-      {action}
-      {stopPhase === "pending" || stopPhase === "timedOut"
-        ? renderStopGenerationButton(false)
-        : null}
-    </>
-  );
 
   if (pendingAction) {
     return (
@@ -336,9 +304,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           type="submit"
           className={cn(messageActionPillClassName, "h-8 sm:h-7", compact ? "px-3" : "px-4")}
           {...pointerFocusProps}
-          onClick={(event) => {
-            if (stopPhase === "landed") event.preventDefault();
-          }}
           disabled={
             !canOperateThread ||
             isEnvironmentUnavailable ||
@@ -360,46 +325,25 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             m,
           )}
         </button>
-        {canInterrupt || stopPhase === "pending" || stopPhase === "timedOut"
-          ? renderStopGenerationButton(true)
-          : null}
       </div>
     );
   }
 
-  if (
-    (canInterrupt || stopPhase === "pending" || stopPhase === "timedOut") &&
-    !hasSendableContent &&
-    !isEditingQueuedMessage &&
-    !isSendHeld
-  ) {
-    return (
-      <>
-        {children}
-        {renderStopGenerationButton(false)}
-      </>
-    );
-  }
-
-  const showResume = canResume && !hasSendableContent && !isEditingQueuedMessage;
-
   const compactTokens =
-    compactBeforeSendTokens !== null && !showResume && !isEditingQueuedMessage
+    compactBeforeSendTokens !== null && !isEditingQueuedMessage
       ? formatContextWindowTokens(compactBeforeSendTokens)
       : null;
   const compactsBeforeSend = compactTokens !== null && !keepFullHistory;
 
-  const submitLabel = showResume
-    ? gt("Resume thread")
-    : isEditingQueuedMessage
-      ? gt("Update queued message")
-      : compactsBeforeSend
-        ? gt("Compact and send")
-        : isQueuing
-          ? gt("Queue message")
-          : isRunning
-            ? gt("Steer message")
-            : gt("Submit message");
+  const submitLabel = isEditingQueuedMessage
+    ? gt("Update queued message")
+    : compactsBeforeSend
+      ? gt("Compact and send")
+      : isRunningFollowUp && isQueuing
+        ? gt("Queue message")
+        : isRunningFollowUp
+          ? gt("Steer message")
+          : gt("Submit message");
   const submitStatus = isEnvironmentUnavailable
     ? gt("Environment disconnected")
     : isSendHeld
@@ -431,14 +375,14 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     submitStatus ??
     (compactsBeforeSend
       ? gt("Summarize {tokens} tokens of history, then send", { tokens: compactTokens })
-      : isRunning && !isEditingQueuedMessage && canSteer
+      : isRunningFollowUp && !isEditingQueuedMessage && canSteer
         ? dispatchTooltip
         : submitLabel);
 
   const isBusyOrHeld = isSendBusy || isSendHeld;
   const sendButton = (
     <button
-      type={showResume ? "button" : "submit"}
+      type="submit"
       className={cn(
         "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
         stageBackdropVariant
@@ -446,20 +390,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           : "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover disabled:bg-foreground/12 disabled:text-muted-foreground",
       )}
       {...pointerFocusProps}
-      onClick={(event) => {
-        if (stopPhase === "landed") {
-          event.preventDefault();
-          return;
-        }
-        if (showResume) onResume?.();
-        else onSubmitMessage?.(event);
-      }}
-      disabled={
-        isBusyOrHeld ||
-        isSendDisabled ||
-        isEnvironmentUnavailable ||
-        (!hasSendableContent && !showResume)
-      }
+      onClick={onSubmitMessage}
+      disabled={isBusyOrHeld || isSendDisabled || isEnvironmentUnavailable || !hasSendableContent}
       aria-label={submitStatus ?? submitLabel}
       aria-busy={isBusyOrHeld || undefined}
     >
@@ -470,13 +402,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       ) : null}
       {isBusyOrHeld ? (
         <Spinner size="sm" aria-hidden="true" />
-      ) : showResume ? (
-        <PlayIcon className="size-4 fill-current" aria-hidden="true" />
       ) : isEditingQueuedMessage ? (
         <CheckIcon className="size-4" aria-hidden="true" />
-      ) : isRunning && isQueuing ? (
+      ) : isRunningFollowUp && isQueuing ? (
         <ListPlusIcon className="size-4" aria-hidden="true" />
-      ) : isRunning ? (
+      ) : isRunningFollowUp ? (
         <CornerUpRightIcon className="size-4" aria-hidden="true" />
       ) : (
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
@@ -499,15 +429,15 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     </Tooltip>
   );
   if (compactTokens === null || hideCompactToggle) {
-    return withStopButton(
+    return (
       <>
         {children}
         {submit}
-      </>,
+      </>
     );
   }
 
-  return withStopButton(
+  return (
     <div data-chat-composer-compact-send="true" className="flex items-center gap-2">
       <SharedTooltipTrigger
         render={
@@ -546,6 +476,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       </SharedTooltipTrigger>
       {children}
       {submit}
-    </div>,
+    </div>
   );
 });

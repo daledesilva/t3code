@@ -799,7 +799,7 @@ it("a rejected send leaves the timeline when a new draft was typed meanwhile", a
   expect(editor.element().textContent).toContain("Next draft");
 });
 
-it("Enter on an empty prompt resumes an interrupted thread", async () => {
+it("the timeline Resume button resumes an interrupted thread", async () => {
   const history = threadWithHistory("interrupted", 1);
   const interruptedRun = { ...history.runs[0]!, status: "interrupted" as const };
   const thread = { ...history, runs: [interruptedRun] };
@@ -816,10 +816,7 @@ it("Enter on an empty prompt resumes an interrupted thread", async () => {
     // AppRoot brings its own router.
     router: false,
   });
-  await expect.element(page.getByRole("button", { name: "Resume thread" })).toBeVisible();
-
-  await userEvent.click(page.getByTestId("composer-editor"));
-  await userEvent.keyboard("{Enter}");
+  await userEvent.click(page.getByRole("button", { name: "Resume thread" }));
 
   await vi.waitFor(() =>
     expect(dispatchedCommands()).toContainEqual(

@@ -121,9 +121,12 @@ import {
   WorkGroupSection,
   WorkingTimelineRow,
   ThinkingTimelineRow,
+  TimelineStopGenerationButton,
+  TimelineResumeThreadButton,
   LiveWorkEntryTimelineRow,
   WorkGroupToggleTimelineRow,
 } from "./TimelineWorkGroupRows";
+import { useStopPhase } from "./ComposerPrimaryActions";
 import { ViewedImagesTimelineRow } from "./TimelineWorkEntryRow";
 import { UserMessageRow } from "./TimelineUserMessageRow";
 import {
@@ -261,6 +264,11 @@ interface MessagesTimelineProps {
   onOpenWorktreeSetupTerminal?: (terminalId: string) => void;
   isPreparingWorktree?: boolean;
   isCompacting?: boolean;
+  canInterrupt?: boolean;
+  onInterrupt?: () => void;
+  canResume?: boolean;
+  resumeDisabled?: boolean;
+  onResume?: () => void;
   awaitingUser?: "approval" | "input" | null;
   /** Which request is waiting, so a second one of the same kind is announced too. */
   awaitingRequestId?: string | null;
@@ -386,6 +394,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onOpenWorktreeSetupTerminal,
   isPreparingWorktree = false,
   isCompacting = false,
+  canInterrupt = false,
+  onInterrupt,
+  canResume = false,
+  resumeDisabled = false,
+  onResume,
   awaitingUser = null,
   awaitingRequestId = null,
   listRef,
@@ -445,6 +458,19 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const gt = useGT();
   const canvas = useChatCanvas();
   const contentInsetEndAdjustment = resolveTimelineEndInset(composerInsetEnd, canvas);
+  const [stopPhase, setStopPhase] = useStopPhase({
+    runId: latestRun?.runId ?? null,
+    canInterrupt,
+    canOperateThread,
+  });
+  const stopPending = stopPhase === "pending";
+  const showStop = canInterrupt || stopPhase === "pending" || stopPhase === "timedOut";
+  const requestInterrupt = onInterrupt
+    ? () => {
+        setStopPhase("pending");
+        onInterrupt();
+      }
+    : undefined;
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
   // Snapshot restore positions on identity changes; ongoing scroll writes must not move them.
   // Find open at the opening is part of the snapshot: opening find later
@@ -809,6 +835,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     rows.length === 0 &&
     unmatchedPendingApprovals.length === 0 &&
     !isWorking &&
+    !showStop &&
+    !canResume &&
     parentThreadLink === null &&
     historyControls === undefined &&
     footer === null;
@@ -1206,6 +1234,20 @@ const ConversationTimeline = memo(function ConversationTimeline({
     latestRun?.startedAt != null
       ? worktreeSetup
       : null;
+  const lastTimelineRow = rows.at(-1);
+  const inlineStopRowId =
+    showStop &&
+    requestInterrupt !== undefined &&
+    unmatchedPendingApprovals.length === 0 &&
+    !compactionAwaitingRow &&
+    !isPreparingWorktree &&
+    lastTimelineRow !== undefined &&
+    ((lastTimelineRow.kind === "thinking" && pendingApprovalsByRequestId.size === 0) ||
+      (lastTimelineRow.kind === "work-live" &&
+        !lastTimelineRow.expanded &&
+        lastTimelineRow.entry.itemType === "reasoning"))
+      ? lastTimelineRow.id
+      : null;
   const activityState: TimelineRowActivityState = {
     isWorking,
     isCompacting: compactionAwaitingRow,
@@ -1218,6 +1260,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
     latestRunId: latestRun?.runId ?? null,
     liveAnswerPreview:
       isWorking && toolCallVisibility === "zen" ? liveAnswerPreview(timelineEntries) : null,
+    inlineStopRowId,
+    onInterrupt: showStop ? (requestInterrupt ?? null) : null,
+    stopPending,
   };
   // Mounted in both the empty and filled timeline so a thread's first turn
   // starts from a baseline instead of a fresh, silent region.
@@ -1429,12 +1474,49 @@ const ConversationTimeline = memo(function ConversationTimeline({
       </div>
     </TimelineRowCtx>
   );
-  const listExtraData = { identity: listIdentityKey, rowCount: rows.length, sharedState };
+  const listExtraData = {
+    identity: listIdentityKey,
+    rowCount: rows.length,
+    sharedState,
+    inlineStopRowId,
+  };
   const timelineListFooter = (
     <TimelineListFooter
       composerInset={anchoredEndSpace ? 0 : contentInsetEndAdjustment}
       onGrow={onFooterGrow}
     >
+      {showStop && requestInterrupt && inlineStopRowId === null ? (
+        <div className="messages-timeline-row-frame">
+          <div
+            className="chat-content-lane flex justify-end overflow-x-clip pb-2"
+            data-timeline-root="true"
+          >
+            <TimelineStopGenerationButton
+              disabled={!canOperateThread}
+              pending={stopPending}
+              onInterrupt={requestInterrupt}
+            />
+          </div>
+        </div>
+      ) : !showStop && canResume && onResume ? (
+        <div className="messages-timeline-row-frame">
+          <div
+            className="chat-content-lane flex justify-end overflow-x-clip pb-2"
+            data-timeline-root="true"
+          >
+            <TimelineResumeThreadButton
+              disabled={
+                !canOperateThread ||
+                isRevertingCheckpoint ||
+                isPreparingWorktree ||
+                resumeDisabled ||
+                stopPhase === "landed"
+              }
+              onResume={onResume}
+            />
+          </div>
+        </div>
+      ) : null}
       {footer}
       {unmatchedPendingApprovals.length > 0 ? (
         <TimelineRowCtx value={sharedState}>

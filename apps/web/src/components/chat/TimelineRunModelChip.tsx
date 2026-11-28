@@ -18,6 +18,7 @@ import { usePrimarySettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { deriveProviderInstanceEntries, shouldShowInstanceBadge } from "../../providerInstances";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
+import { SharedTooltipTrigger } from "../ui/shared-tooltip";
 import { describeComposerEffort } from "./ComposerModelEffort";
 import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
@@ -117,6 +118,7 @@ export const TimelineRunModelChip = memo(function TimelineRunModelChip(props: {
   readonly modelSelection: ModelSelection;
   readonly providers?: ReadonlyArray<ServerProvider> | undefined;
   readonly prompt?: string | undefined;
+  readonly variant?: "inline" | "badge" | undefined;
   readonly className?: string | undefined;
   readonly testId?: string | undefined;
 }) {
@@ -158,13 +160,16 @@ export const TimelineRunModelChip = memo(function TimelineRunModelChip(props: {
       )
     : { suffix: null, detail: null };
   const tooltipLabel = [triggerLabel, effort.detail].filter(Boolean).join(" · ");
+  const isBadge = props.variant === "badge";
 
-  return (
+  const chip = (
     <span
       data-testid={props.testId ?? "timeline-run-model-chip"}
       aria-label={tooltipLabel || undefined}
       className={cn(
-        "inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground",
+        isBadge
+          ? "inline-flex min-w-0 max-w-full items-center gap-1 rounded-full border border-border/70 bg-muted/50 px-1.5 py-0.5 text-2xs font-medium leading-none text-foreground/80"
+          : "inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground",
         props.className,
       )}
     >
@@ -177,13 +182,19 @@ export const TimelineRunModelChip = memo(function TimelineRunModelChip(props: {
           acpRegistryIconUrl={activeEntry?.acpRegistryIconUrl}
           showBadge={showInstanceBadge}
           size="compact"
-          className="size-3.5"
-          iconClassName="size-3.5 text-muted-foreground"
-          indicatorBackground="var(--background)"
+          {...(isBadge ? {} : { className: "size-3.5" })}
+          iconClassName={isBadge ? "size-3" : "size-3.5 text-muted-foreground"}
+          indicatorBackground={isBadge ? "var(--muted)" : "var(--background)"}
         />
       ) : null}
       <span className="truncate">{triggerTitle}</span>
       {effort.suffix}
     </span>
   );
+
+  if (isBadge && tooltipLabel) {
+    return <SharedTooltipTrigger render={chip} label={tooltipLabel} />;
+  }
+
+  return chip;
 });

@@ -142,7 +142,7 @@ export function SidebarSectionHeader(props: {
     <SortableSidebarMarker
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
-      className={cn("relative mx-0.5 h-8 border-t border-muted-foreground/65", props.className)}
+      className={cn("relative mx-0.5 h-8 border-t border-muted-foreground/30", props.className)}
     >
       <CollapsibleSectionHeader
         data-sidebar-row={`shelf:${shelf}`}

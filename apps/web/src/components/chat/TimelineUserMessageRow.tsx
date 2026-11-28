@@ -61,6 +61,7 @@ import { MessageCopyButton } from "./MessageCopyButton";
 import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { formatBytes } from "../../lib/formatBytes";
+import { TimelineRunModelChip } from "./TimelineRunModelChip";
 import {
   asKnownContextRecord,
   resolveUserMessageContext,
@@ -840,6 +841,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       </div>
     ) : null;
 
+  const messageRun = ctx.runs.findLast((run) => run.userMessageId === row.message.id);
   // Touch shows actions all the time, and narrow lanes have no room beside the
   // bubble, so both keep the actions on their own line.
   const floatActions = row.groupedWithNext === true && !coarsePointer;
@@ -958,6 +960,23 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                 : gt("{name} (guest)", { name: userMessage.guestName })}
           </MessageAuthorHeading>
         )}
+        {messageRun ? (
+          <div
+            className={cn(
+              "flex max-w-full flex-wrap items-center gap-1 self-start",
+              folded ? "px-3 pt-2" : "mb-1.5",
+            )}
+          >
+            <TimelineRunModelChip
+              environmentId={ctx.activeThreadEnvironmentId}
+              providerInstanceId={messageRun.providerInstanceId}
+              modelSelection={messageRun.modelSelection}
+              prompt={row.message.text}
+              variant="badge"
+              testId="user-message-model-chip"
+            />
+          </div>
+        ) : null}
         {folded ? (
           <FoldedMessageHeader
             icon={MessagesSquareIcon}
@@ -1121,9 +1140,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       {!folded || expanded ? (
         <div
           className={cn(
-            "flex w-full max-w-[80%] justify-end pe-1",
-            floatActions && "@min-[37rem]:hidden",
+            "flex w-full max-w-[80%] items-center justify-end pe-1",
             ACTIONS_REVEAL_CLASS_NAME,
+            floatActions && "@min-[37rem]:hidden",
           )}
         >
           {messageActions}

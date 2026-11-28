@@ -5728,5 +5728,6 @@
   "f6cf1627f4acc5ef": "Comment audience",
   "eb1fd384ad5919dd": "Internal note",
   "b45f0b467e9406d0": "Reply to customer",
-  "15e5597f8f93ce12": "{start} to {end}"
+  "15e5597f8f93ce12": "{start} to {end}",
+  "06980d8cc44e7fe6": "Usage limit reached for {model}."
 }

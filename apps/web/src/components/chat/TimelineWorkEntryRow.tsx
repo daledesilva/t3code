@@ -59,6 +59,7 @@ import {
 import { cn } from "~/lib/utils";
 import type { MessageResolver } from "~/i18n/messages";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
+import { TimelineRunModelChip } from "./TimelineRunModelChip";
 import { FetchedToolOutput, V2ItemInspector } from "./V2ItemInspector";
 import { SubagentNotificationLink } from "./V2LifecycleRow";
 import {
@@ -346,6 +347,10 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
   if (pendingApproval) return <TimelinePendingApprovalRow approval={pendingApproval} />;
   if (failureItem?.type === "error" && failureItem.status === "failed") {
     const warning = failureItem.failure.class === "usage_limit";
+    const failureRun =
+      warning && failureItem.runId !== null
+        ? ctx.runs.find((run) => run.id === failureItem.runId)
+        : undefined;
     const resetAt = failureItem.failure.resetAt;
     const verificationUrl = failureItem.failure.verificationUrl;
     // The reset time is the viewer's local time; naming the zone keeps it
@@ -376,10 +381,20 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           />
         }
         label={
-          <span
-            className={cn("text-sm font-medium", warning ? "text-warning" : "text-destructive")}
-          >
-            {label}
+          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span
+              className={cn("text-sm font-medium", warning ? "text-warning" : "text-destructive")}
+            >
+              {label}
+            </span>
+            {failureRun ? (
+              <TimelineRunModelChip
+                environmentId={ctx.activeThreadEnvironmentId}
+                providerInstanceId={failureRun.providerInstanceId}
+                modelSelection={failureRun.modelSelection}
+                testId="usage-limit-model-chip"
+              />
+            ) : null}
           </span>
         }
         trailing={

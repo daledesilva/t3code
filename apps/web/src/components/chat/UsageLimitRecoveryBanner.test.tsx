@@ -1,8 +1,11 @@
-import { RunId } from "@t3tools/contracts";
+import { ProviderInstanceId, RunId } from "@t3tools/contracts";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { usageLimitRecoveryBannerItem } from "./UsageLimitRecoveryBanner";
+import {
+  exhaustedModelUsageLimitBannerItem,
+  usageLimitRecoveryBannerItem,
+} from "./UsageLimitRecoveryBanner";
 
 const stoppedAt = new Date(2026, 9, 20, 12, 0);
 
@@ -82,5 +85,38 @@ describe("usageLimitRecoveryBannerItem", () => {
         .mockReturnValue(new Date(2026, 9, 20, 16, 5).getTime());
       expect(makeScheduled().description).toBe("Reset 15:00");
     }
+  });
+});
+
+describe("exhaustedModelUsageLimitBannerItem", () => {
+  it("includes the model label and reset time without recovery actions", () => {
+    using _now = vi.spyOn(Date, "now").mockReturnValue(stoppedAt.getTime());
+    const banner = exhaustedModelUsageLimitBannerItem({
+      instanceId: ProviderInstanceId.make("antigravity"),
+      model: "gemini-2.5-pro",
+      modelLabel: "Gemini 2.5 Pro · High",
+      resetAt: new Date(2026, 9, 20, 17, 30).toISOString(),
+      timestampFormat: "24-hour",
+    });
+
+    expect(banner).toMatchObject({
+      id: "exhausted-model-usage-limit:antigravity:gemini-2.5-pro",
+      variant: "warning",
+      title: "Usage limit reached",
+      description: "Gemini 2.5 Pro · High · Resets 17:30",
+    });
+    expect(banner.actions).toBeUndefined();
+  });
+
+  it("falls back to the model label when no reset time is reported", () => {
+    const banner = exhaustedModelUsageLimitBannerItem({
+      instanceId: ProviderInstanceId.make("antigravity"),
+      model: "gemini-2.5-pro",
+      modelLabel: "Gemini 2.5 Pro",
+      resetAt: null,
+      timestampFormat: "24-hour",
+    });
+
+    expect(banner.description).toBe("Gemini 2.5 Pro · Reset time unavailable");
   });
 });

@@ -63,11 +63,31 @@ const SAVED_OPTION_LABELS: Readonly<Record<string, string>> = {
   variant: msg("Reasoning", { $context: "model option name" }),
 };
 
+const SAVED_OPTION_VALUE_LABELS: Readonly<Record<string, string>> = {
+  minimal: msg("Minimal", { $context: "reasoning level" }),
+  low: msg("Low", { $context: "reasoning level" }),
+  medium: msg("Medium", { $context: "reasoning level" }),
+  high: msg("High", { $context: "reasoning level" }),
+  xhigh: msg("Extra High", { $context: "reasoning level" }),
+  max: msg("Max", { $context: "reasoning level" }),
+  off: msg("Off", { $context: "reasoning level" }),
+  none: msg("None", { $context: "reasoning level" }),
+};
+
 function savedOptionLabel(id: string, resolve: MessageResolver): string {
   const saved = SAVED_OPTION_LABELS[id];
   return saved !== undefined
     ? resolve(saved)
     : id
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .replace(/^./, (character) => character.toUpperCase());
+}
+
+function savedOptionValueLabel(value: string, resolve: MessageResolver): string {
+  const saved = SAVED_OPTION_VALUE_LABELS[value];
+  return saved !== undefined
+    ? resolve(saved)
+    : value
         .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
         .replace(/^./, (character) => character.toUpperCase());
 }
@@ -88,7 +108,9 @@ function buildUnavailableModelOptionDescriptors(
           id: selection.id,
           label: savedOptionLabel(selection.id, resolve),
           type: "select" as const,
-          options: [{ id: selection.value, label: selection.value }],
+          options: [
+            { id: selection.value, label: savedOptionValueLabel(selection.value, resolve) },
+          ],
           currentValue: selection.value,
         },
   );

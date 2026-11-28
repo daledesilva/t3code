@@ -5726,5 +5726,6 @@
   "f6cf1627f4acc5ef": "Sichtbarkeit des Kommentars",
   "eb1fd384ad5919dd": "Interne Notiz",
   "b45f0b467e9406d0": "Dem Kunden antworten",
-  "15e5597f8f93ce12": "{start} bis {end}"
+  "15e5597f8f93ce12": "{start} bis {end}",
+  "06980d8cc44e7fe6": "Nutzungslimit für {model} erreicht."
 }

@@ -1,12 +1,11 @@
 import {
-  ANTIGRAVITY_DEFAULT_MODEL,
   type ProviderInstanceId,
   type EnvironmentId,
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { RegistryContext } from "@effect/atom-react";
-import { T, useGT } from "gt-react";
+import { T, useGT, useMessages } from "gt-react";
 import {
   createContext,
   memo,
@@ -26,6 +25,7 @@ import { retainedModelWhileProviderLocked } from "./ProviderModelPicker.logic";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { ModelEsque, getDisplayModelName, getTriggerDisplayModelName } from "./providerIconUtils";
+import { resolveModelTriggerLabel } from "./TimelineRunModelChip";
 import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
 import { ComposerControl, type ComposerControlSize } from "./ComposerControl";
 import { takeOpenTarget, useComposerMenuProps } from "./composerEventScope";
@@ -149,6 +149,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     if (isMenuOpen) refreshModelCatalog();
   }, [isMenuOpen]);
   const gt = useGT();
+  const resolve = useMessages();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement | null>(null);
@@ -162,26 +163,16 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const activeInstanceId = props.activeInstanceId;
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? [];
-  const selectedModel =
-    resolveModelPickerSelectedModel({
-      driverKind: activeEntry?.driverKind,
-      model: props.model,
-      options: selectedInstanceOptions,
-    }) ??
-    retainedModelWhileProviderLocked(activeEntry, props.model) ??
-    (activeEntry?.driverKind === "opencode" || activeEntry?.driverKind === "antigravity"
-      ? undefined
-      : selectedInstanceOptions[0]);
-  const triggerTitle = selectedModel
-    ? getTriggerDisplayModelName(selectedModel, activeEntry?.driverKind)
-    : props.model === ANTIGRAVITY_DEFAULT_MODEL
-      ? gt("Choose model")
-      : props.model || gt("Choose model");
+  const { selectedModel, triggerTitle, triggerLabel } = resolveModelTriggerLabel({
+    driverKind: activeEntry?.driverKind,
+    model: props.model,
+    options: selectedInstanceOptions,
+    fallbackToFirstOption: true,
+    retainedModel: retainedModelWhileProviderLocked(activeEntry, props.model),
+    resolve,
+  });
   const withUnavailable = (model: string, isUnavailable: boolean | undefined) =>
     isUnavailable ? gt("{model} (Unavailable)", { model }) : model;
-  const triggerLabel = selectedModel
-    ? withUnavailable(getDisplayModelName(selectedModel), selectedModel.isUnavailable)
-    : triggerTitle;
   const showInstanceBadge =
     activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries);
 

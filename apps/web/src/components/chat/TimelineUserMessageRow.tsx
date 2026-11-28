@@ -1,10 +1,7 @@
 import { copySnapshot as copySnapshotToClipboard } from "./copySnapshot";
 import { InlineAudioPreview } from "../files/InlineAudioPreview";
 import { filePreviewKind } from "@t3tools/shared/filePreview";
-import {
-  CHAT_USER_MARKDOWN_REMARK_PLUGINS,
-  remarkEnableOrderedListNumbers,
-} from "@t3tools/shared/markdownPipeline";
+import type { MarkdownExtensions } from "~/markdown/wordsHast";
 import { T, useGT, useMessages, Var } from "gt-react";
 import { findRevealRef } from "./markdownFindContext";
 import {
@@ -65,7 +62,6 @@ import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { formatBytes } from "../../lib/formatBytes";
 import { TimelineRunModelChip } from "./TimelineRunModelChip";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   asKnownContextRecord,
   resolveUserMessageContext,
@@ -99,6 +95,7 @@ import {
   resolvePreviewAnnotationImage,
   userMessageFileLabel,
 } from "./TimelineUserMessageRow.logic";
+import { SharedTooltipTrigger } from "../ui/shared-tooltip";
 
 // Drawn inside the media so dark screenshots keep an edge on the dark background.
 const MEDIA_EDGE_CLASS_NAME =
@@ -171,25 +168,25 @@ function UserFileCard({
           >
             {identity}
           </button>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-xs"
-                  variant="ghost-muted"
-                  aria-label={gt("Download {label}", { label })}
-                  onClick={() => ctx.onFileDownload(file)}
-                />
-              }
-            >
-              <DownloadIcon />
-            </TooltipTrigger>
-            <TooltipPopup side="top">
-              <T>
-                Download <Var>{label}</Var>
-              </T>
-            </TooltipPopup>
-          </Tooltip>
+          <SharedTooltipTrigger
+            render={
+              <Button
+                size="icon-xs"
+                variant="ghost-muted"
+                aria-label={gt("Download {label}", { label })}
+                onClick={() => ctx.onFileDownload(file)}
+              />
+            }
+            label={
+              <>
+                <T>
+                  Download <Var>{label}</Var>
+                </T>
+              </>
+            }
+          >
+            <DownloadIcon />
+          </SharedTooltipTrigger>
         </>
       )}
     </div>
@@ -289,7 +286,9 @@ function UserMessageContent({ row }: { row: Extract<TimelineRow, { kind: "messag
     <WorkflowOpeningBlock
       opening={ctx.workflowOpening}
       environmentId={ctx.activeThreadEnvironmentId}
-      onOpenThread={(threadId) => ctx.onOpenThread(ThreadId.make(threadId))}
+      onOpenThread={(threadId, intent) =>
+        ctx.onOpenThread(ThreadId.make(threadId), undefined, intent)
+      }
     />
   ) : resolveUserMessagePresentation(row.message).attribution === "automation" ? (
     <AutomationMessageRow row={row} />
@@ -429,7 +428,8 @@ export function FoldedMessageHeader(props: {
       >
         {props.label}
       </span>
-      <span className="min-w-0 flex-1 truncate">{props.summary}</span>
+      {/* Mentioned macOS paths can be NFD; compose them like the chips in the body. */}
+      <span className="min-w-0 flex-1 truncate">{props.summary.normalize("NFC")}</span>
       <ChevronDownIcon
         className={cn(
           "size-3.5 shrink-0 text-muted-foreground transition-transform",
@@ -860,20 +860,18 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           <T>Open thread</T>
         </InlineButton>
       ) : null}
-      <Tooltip>
-        <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
-          {formatDayAwareTimestamp(
-            row.message.createdAt,
-            ctx.timestampFormat,
-            undefined,
-            undefined,
-            m,
-          )}
-        </TooltipTrigger>
-        <TooltipPopup>
-          {formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat, m)}
-        </TooltipPopup>
-      </Tooltip>
+      <SharedTooltipTrigger
+        render={<p className="text-muted-foreground text-xs tabular-nums" />}
+        label={formatChatTimestampTooltip(row.message.createdAt, ctx.timestampFormat, m)}
+      >
+        {formatDayAwareTimestamp(
+          row.message.createdAt,
+          ctx.timestampFormat,
+          undefined,
+          undefined,
+          m,
+        )}
+      </SharedTooltipTrigger>
       <div className={cn("flex items-center gap-0.5", floatActions && "flex-wrap justify-end")}>
         {typeof revertTurnCount === "number" && (
           <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
@@ -1056,25 +1054,25 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                           {fileIdentity}
                           <EyeIcon className="size-4 shrink-0" />
                         </button>
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <Button
-                                size="icon-xs"
-                                variant="ghost-muted"
-                                aria-label={gt("Download {label}", { label })}
-                                onClick={() => ctx.onFileDownload(file)}
-                              />
-                            }
-                          >
-                            <DownloadIcon />
-                          </TooltipTrigger>
-                          <TooltipPopup side="top">
-                            <T>
-                              Download <Var>{label}</Var>
-                            </T>
-                          </TooltipPopup>
-                        </Tooltip>
+                        <SharedTooltipTrigger
+                          render={
+                            <Button
+                              size="icon-xs"
+                              variant="ghost-muted"
+                              aria-label={gt("Download {label}", { label })}
+                              onClick={() => ctx.onFileDownload(file)}
+                            />
+                          }
+                          label={
+                            <>
+                              <T>
+                                Download <Var>{label}</Var>
+                              </T>
+                            </>
+                          }
+                        >
+                          <DownloadIcon />
+                        </SharedTooltipTrigger>
                       </div>
                     );
                   }
@@ -1157,30 +1155,28 @@ function UserMessageIntentMarker({
 }) {
   const gt = useGT();
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <div
-            className="me-1 flex items-center justify-end gap-1 text-xs leading-none text-muted-foreground"
-            data-user-message-intent={intent}
-          />
-        }
-      >
-        <Redo2Icon aria-hidden="true" className="size-3" />
-        {unread
-          ? gt("Steer · waiting to be read")
-          : gt("Steer", { $context: "noun, a message that steers the running turn" })}
-      </TooltipTrigger>
-      <TooltipPopup side="top">
-        {unread
+    <SharedTooltipTrigger
+      render={
+        <div
+          className="me-1 flex items-center justify-end gap-1 text-xs leading-none text-muted-foreground"
+          data-user-message-intent={intent}
+        />
+      }
+      label={
+        unread
           ? gt(
               "Waiting for the agent to read this. It reads steers between steps, after a running command finishes.",
             )
           : intent === "promoted_queued_to_steer"
             ? gt("Originally queued, then promoted to steer the active turn")
-            : gt("Steered the active turn")}
-      </TooltipPopup>
-    </Tooltip>
+            : gt("Steered the active turn")
+      }
+    >
+      <Redo2Icon aria-hidden="true" className="size-3" />
+      {unread
+        ? gt("Steer · waiting to be read")
+        : gt("Steer", { $context: "noun, a message that steers the running turn" })}
+    </SharedTooltipTrigger>
   );
 }
 
@@ -1196,25 +1192,25 @@ function RevertUserMessageButton({
   const gt = useGT();
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            disabled={activity.isRevertingCheckpoint || activity.isWorking}
-            onClick={() => ctx.onRevertToTurnCount(turnCount, messageId)}
-            aria-label={gt("Edit from here")}
-          />
-        }
-      >
-        <PencilIcon className="size-3" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">
-        <T>Edit from here</T>
-      </TooltipPopup>
-    </Tooltip>
+    <SharedTooltipTrigger
+      render={
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          disabled={activity.isRevertingCheckpoint || activity.isWorking}
+          onClick={() => ctx.onRevertToTurnCount(turnCount, messageId)}
+          aria-label={gt("Edit from here")}
+        />
+      }
+      label={
+        <>
+          <T>Edit from here</T>
+        </>
+      }
+    >
+      <PencilIcon className="size-3" />
+    </SharedTooltipTrigger>
   );
 }
 
@@ -1291,10 +1287,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   );
 });
 
-const USER_MESSAGE_REMARK_PLUGINS = [
-  ...CHAT_USER_MARKDOWN_REMARK_PLUGINS,
-  remarkEnableOrderedListNumbers,
-];
+const USER_MESSAGE_MARKDOWN: MarkdownExtensions = { userMessage: true, leadingWhitespace: true };
 
 const UserMessageBody = memo(function UserMessageBody(props: {
   text: string;
@@ -1315,7 +1308,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
       className="text-message-foreground user-message-markdown"
       lineBreaks
       parseRawHtml={false}
-      extraRemarkPlugins={USER_MESSAGE_REMARK_PLUGINS}
+      extensions={USER_MESSAGE_MARKDOWN}
       renderContextReference={props.renderContextReference}
       headingLevelOffset={MESSAGE_HEADING_LEVEL}
     />

@@ -44,6 +44,17 @@ export interface ThreadQueueWorkflowState {
   readonly canSendNow: boolean;
 }
 
+export function isQueuedRunHeldOnlyForEdit(
+  run: Pick<Run, "queueHeld" | "queueHoldReasons">,
+): boolean {
+  return (
+    run.queueHeld === true &&
+    run.queueHoldReasons !== undefined &&
+    run.queueHoldReasons.length === 1 &&
+    run.queueHoldReasons[0] === "edit"
+  );
+}
+
 export function resolveActiveThreadRun(projection: Pick<Projection, "runs">): Run | null {
   return projection.runs.findLast((run) => ACTIVE_RUN_STATUSES.has(run.status)) ?? null;
 }
@@ -220,7 +231,10 @@ export function deriveThreadQueueWorkflowState(
   return {
     activeRun,
     queuedRuns,
-    isHeld: projection.runs.some((run) => run.status === "queued" && run.queueHeld === true),
+    isHeld: projection.runs.some(
+      (run) =>
+        run.status === "queued" && run.queueHeld === true && !isQueuedRunHeldOnlyForEdit(run),
+    ),
     canSendNow:
       activeRun === null &&
       projection.thread.archivedAt == null &&

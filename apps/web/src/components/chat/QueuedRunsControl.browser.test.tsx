@@ -22,8 +22,11 @@ import { page } from "vite-plus/test/browser";
 
 const state = vi.hoisted(() => ({
   threadState: null as unknown as Atom.Writable<AsyncResult.AsyncResult<EnvironmentThreadState>>,
+  providers: null as unknown as Atom.Writable<ReadonlyArray<unknown>>,
+  settings: null as unknown as Atom.Writable<unknown>,
   workflow: null as unknown,
   commandResult: undefined as unknown,
+  commands: vi.fn<(value: unknown) => Promise<unknown>>(async () => undefined),
 }));
 
 vi.mock(import("@t3tools/client-runtime/state/thread-workflows"), async (importOriginal) => ({
@@ -53,6 +56,21 @@ vi.mock(import("../../state/query"), async (importOriginal) => ({
   })) as never,
 }));
 
+vi.mock(import("../../state/server"), async (importOriginal) => {
+  const actual = await importOriginal();
+  const { Atom } = await import("effect/reactivity");
+  state.providers = Atom.make<ReadonlyArray<unknown>>([]).pipe(Atom.keepAlive);
+  state.settings = Atom.make<unknown>(null).pipe(Atom.keepAlive);
+  return {
+    ...actual,
+    serverEnvironment: {
+      ...actual.serverEnvironment,
+      providersValueAtom: () => state.providers,
+      settingsValueAtom: () => state.settings,
+    } as never,
+  };
+});
+
 // The thread detail atoms are real, fed by one state atom the test writes.
 vi.mock(import("../../state/threads"), async (importOriginal) => {
   const { createEnvironmentThreadDetailAtoms, EMPTY_ENVIRONMENT_THREAD_STATE } =
@@ -74,7 +92,7 @@ vi.mock(import("../../state/threads"), async (importOriginal) => {
 
 vi.mock(import("../../state/use-atom-command"), async (importOriginal) => ({
   ...(await importOriginal()),
-  useAtomCommand: (() => async () => state.commandResult) as never,
+  useAtomCommand: (() => state.commands) as never,
 }));
 
 vi.mock(import("../../assets/assetUrls"), async (importOriginal) => ({
@@ -95,6 +113,8 @@ import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 
 function setup() {
   state.workflow = null;
+  state.commands.mockReset();
+  state.commands.mockImplementation(async () => state.commandResult);
   state.commandResult = undefined;
 }
 
@@ -105,7 +125,6 @@ const baseProps = {
   editingRunId: null,
   editBlockedReason: null,
   onEditQueuedRun: () => undefined,
-  onCancelEdit: () => undefined,
   timestampFormat: "locale",
   onOpenThread: () => undefined,
   onImageExpand: () => undefined,
@@ -238,6 +257,26 @@ it("previews assistant quotes as readable text and preserves the citation when e
   expect(onEditQueuedRun).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({ text: quoteAndText }),
   );
+
+  await expect
+    .element(page.getByRole("button", { name: "Reorder queued message", exact: true }).first())
+    .toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: "Copy message", exact: true }).first())
+    .toBeInTheDocument();
+  await expect
+    .element(page.getByRole("button", { name: "Copy prompt link", exact: true }).first())
+    .toBeInTheDocument();
+  await page.getByRole("button", { name: "Edit queued message", exact: true }).first().hover();
+  await page.getByRole("button", { name: "Merge", exact: true }).first().click();
+  expect(state.commands).toHaveBeenCalledExactlyOnceWith({
+    environmentId: "environment:test",
+    input: {
+      threadId: "thread:test",
+      targetRunId: "run:quote-only",
+      sourceRunId: "run:quote-and-text",
+    },
+  });
 });
 
 it("shows who sent a queued message and folds automation and agent prompts", async () => {
@@ -309,12 +348,16 @@ it("shows who sent a queued message and folds automation and agent prompts", asy
   await expect.element(page.getByText(/Follow the runbook/)).toBeVisible();
   await expect.element(page.getByRole("link", { name: "Open automation" })).toBeInTheDocument();
 
-  await expect.element(page.getByRole("button", { name: /Release lead/ })).toBeVisible();
-  await page.getByRole("button", { name: "Open thread" }).nth(0).click({ force: true });
+  const releaseLead = page.getByRole("button", { name: /Release lead/ });
+  await expect.element(releaseLead).toBeVisible();
+  await releaseLead.hover();
+  await page.getByRole("button", { name: "Open thread" }).nth(0).click();
   expect(onOpenThread).toHaveBeenCalledExactlyOnceWith("thread:lead", "environment:test");
   // A sender in a connected linked environment keeps the title it sent and opens there.
-  await expect.element(page.getByRole("button", { name: /Title when sent/ })).toBeVisible();
-  await page.getByRole("button", { name: "Open thread" }).nth(1).click({ force: true });
+  const linkedSender = page.getByRole("button", { name: /Title when sent/ });
+  await expect.element(linkedSender).toBeVisible();
+  await linkedSender.hover();
+  await page.getByRole("button", { name: "Open thread" }).nth(1).click();
   expect(onOpenThread).toHaveBeenLastCalledWith("thread:linked-lead", "environment:linked");
 
   await expect.element(page.getByText("Sent by T3 Code")).toBeVisible();
@@ -442,4 +485,280 @@ it("tells the user why Send now was rejected", async () => {
 
   await page.getByRole("button", { name: "Send now" }).click();
   await vi.waitFor(() => expect(page.getByText(reason).element()).toBeVisible());
+});
+
+it("shows minimal top-left model diff badges and context implications only when relevant", async () => {
+  setup();
+  const { ProviderInstanceId } = await import("@t3tools/contracts");
+  const codex = ProviderInstanceId.make("codex");
+  const claude = ProviderInstanceId.make("claudeAgent");
+  const base = makeThreadProjectionFixture();
+  const registry = AtomRegistry.make();
+  await using stack = new AsyncDisposableStack();
+  stack.defer(() => registry.dispose());
+  registry.set(
+    state.threadState,
+    AsyncResult.success<EnvironmentThreadState>({
+      ...EMPTY_ENVIRONMENT_THREAD_STATE,
+      data: Option.some({
+        ...base,
+        thread: {
+          ...base.thread,
+          modelSelection: { instanceId: codex, model: "gpt-5.4" },
+        },
+        runs: [
+          {
+            id: "run:active" as never,
+            threadId: base.thread.id,
+            ordinal: 1,
+            providerInstanceId: codex,
+            modelSelection: { instanceId: codex, model: "gpt-5.4" },
+            providerThreadId: null,
+            userMessageId: MessageId.make("message:active"),
+            rootNodeId: null,
+            activeAttemptId: null,
+            status: "running",
+            queuePosition: null,
+            requestedAt: DateTime.makeUnsafe("2026-10-27T12:00:00.000Z"),
+            startedAt: DateTime.makeUnsafe("2026-10-27T12:00:00.000Z"),
+            completedAt: null,
+            checkpointId: null,
+            contextHandoffId: null,
+          },
+        ],
+        providerThreads: [],
+      }),
+    }),
+  );
+  registry.set(state.providers, [
+    {
+      instanceId: codex,
+      driver: "codex",
+      displayName: "Codex",
+      enabled: true,
+      models: [
+        {
+          slug: "gpt-5.4",
+          name: "GPT-5.4",
+          isCustom: false,
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "reasoningEffort",
+                label: "Reasoning effort",
+                type: "select",
+                role: "reasoning",
+                options: [
+                  { id: "medium", label: "Medium", isDefault: true },
+                  { id: "high", label: "High" },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      instanceId: claude,
+      driver: "claudeAgent",
+      displayName: "Claude",
+      enabled: true,
+      models: [
+        {
+          slug: "claude-opus-4-6",
+          name: "Claude Opus 4.6",
+          shortName: "Opus 4.6",
+          isCustom: false,
+          capabilities: null,
+        },
+      ],
+    },
+  ]);
+  state.workflow = {
+    activeRun: { id: "run:active" },
+    canPromoteToSteer: true,
+    queuedRuns: [
+      {
+        run: {
+          id: "run:effort-only",
+          userMessageId: "message:effort-only",
+          modelSelection: {
+            instanceId: codex,
+            model: "gpt-5.4",
+            options: [{ id: "reasoningEffort", value: "high" }],
+          },
+        },
+        text: "Think harder",
+        attachments: [],
+      },
+      {
+        run: {
+          id: "run:handoff",
+          userMessageId: "message:handoff",
+          modelSelection: { instanceId: claude, model: "claude-opus-4-6" },
+        },
+        text: "Switch to Claude",
+        attachments: [],
+      },
+    ],
+  };
+  const onEditQueuedRun = vi.fn();
+  await using screen = await renderUi(
+    <RegistryContext.Provider value={registry}>
+      <QueuedRunsControl {...baseProps} onEditQueuedRun={onEditQueuedRun} />
+    </RegistryContext.Provider>,
+  );
+
+  // First queued item changed only thinking level: shows just "High" and no context info badge.
+  const badges = screen.container.querySelectorAll('[data-slot="queued-model-badge"]');
+  expect(badges).toHaveLength(2);
+  expect(badges[0]?.textContent).toBe("High");
+  expect(badges[1]?.textContent).toContain("Opus 4.6");
+
+  // Only the cross-provider handoff item renders the hover-only Context chip.
+  const infoChips = screen.container.querySelectorAll('[data-slot="queued-context-info"]');
+  expect(infoChips).toHaveLength(1);
+  expect(infoChips[0]?.textContent).toContain("Context");
+
+  // Hovering the Context chip shows the context implications tooltip without triggering edit mode.
+  const infoChip = page.getByLabelText("Context implications", { exact: true });
+  await infoChip.hover();
+  await expect.element(page.getByText("Context handoff", { exact: true })).toBeVisible();
+  await expect
+    .element(
+      page.getByText(/Will summarize the conversation up to this point to hand off to Claude/),
+    )
+    .toBeVisible();
+  expect(onEditQueuedRun).not.toHaveBeenCalled();
+
+  // Clicking the bubble passes its modelSelection into edit mode.
+  await page.getByText("Switch to Claude", { exact: true }).click();
+  expect(onEditQueuedRun).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      runId: "run:handoff",
+      modelSelection: { instanceId: claude, model: "claude-opus-4-6" },
+    }),
+  );
+});
+
+it("adds and cancels a Stops here divider between queued items", async () => {
+  setup();
+  state.workflow = {
+    activeRun: { id: "run:active" },
+    canPromoteToSteer: true,
+    queuedRuns: [
+      {
+        run: { id: "run:first", userMessageId: "message:first" },
+        text: "First queued prompt",
+        attachments: [],
+      },
+      {
+        run: { id: "run:second", userMessageId: "message:second" },
+        text: "Second queued prompt",
+        attachments: [],
+      },
+    ],
+  };
+  const registry = AtomRegistry.make();
+  await using stack = new AsyncDisposableStack();
+  stack.defer(() => registry.dispose());
+  const screen = await renderUi(
+    <RegistryContext.Provider value={registry}>
+      <QueuedRunsControl {...baseProps} />
+    </RegistryContext.Provider>,
+  );
+  stack.use(screen);
+
+  // First item shows Stop After (between Merge and Remove); last item does not.
+  const stopAfterButtons = screen.container.querySelectorAll("button");
+  const stopAfter = Array.from(stopAfterButtons).filter(
+    (button) => button.textContent?.trim() === "Stop After",
+  );
+  expect(stopAfter).toHaveLength(1);
+  await page.getByText("First queued prompt", { exact: true }).hover();
+  await page.getByRole("button", { name: "Stop After", exact: true }).click();
+  expect(state.commands).toHaveBeenCalledWith({
+    environmentId: baseProps.environmentId,
+    input: {
+      threadId: baseProps.threadId,
+      runId: "run:second",
+      reason: "stop_before",
+      held: true,
+    },
+  });
+
+  // When the second item carries stop_before, render the Stops here divider with Cancel.
+  state.commands.mockClear();
+  state.workflow = {
+    activeRun: { id: "run:active" },
+    canPromoteToSteer: true,
+    queuedRuns: [
+      {
+        run: { id: "run:first", userMessageId: "message:first" },
+        text: "First queued prompt",
+        attachments: [],
+      },
+      {
+        run: {
+          id: "run:second",
+          userMessageId: "message:second",
+          queueHeld: true,
+          queueHoldReasons: ["stop_before"],
+        },
+        text: "Second queued prompt",
+        attachments: [],
+      },
+    ],
+  };
+  await screen.rerender(
+    <RegistryContext.Provider value={registry}>
+      <QueuedRunsControl {...baseProps} />
+    </RegistryContext.Provider>,
+  );
+
+  await expect.element(page.getByText("Stops here", { exact: true })).toBeVisible();
+  expect(
+    Array.from(screen.container.querySelectorAll("button")).filter(
+      (button) => button.textContent?.trim() === "Stop After",
+    ),
+  ).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(state.commands).toHaveBeenCalledWith({
+    environmentId: baseProps.environmentId,
+    input: {
+      threadId: baseProps.threadId,
+      runId: "run:second",
+      reason: "stop_before",
+      held: false,
+    },
+  });
+
+  // Once earlier items finish and the thread stops at the divider, show Queue interrupted · Stopped by user.
+  state.workflow = {
+    activeRun: null,
+    canSendNow: true,
+    canPromoteToSteer: false,
+    queuedRuns: [
+      {
+        run: {
+          id: "run:second",
+          userMessageId: "message:second",
+          queueHeld: true,
+          queueHoldReasons: ["stop_before"],
+        },
+        text: "Second queued prompt",
+        attachments: [],
+      },
+    ],
+  };
+  await screen.rerender(
+    <RegistryContext.Provider value={registry}>
+      <QueuedRunsControl {...baseProps} />
+    </RegistryContext.Provider>,
+  );
+
+  await expect.element(page.getByText("Queue interrupted", { exact: true })).toBeVisible();
+  await expect.element(page.getByText(/Stopped by user/)).toBeVisible();
+  await expect.element(page.getByText("Stops here", { exact: true })).not.toBeInTheDocument();
 });

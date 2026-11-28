@@ -174,10 +174,13 @@ export function useComposerSelection(input: ComposerSelectionInput) {
       model,
       { preserveUnavailableSelection: true },
     );
+    const isEditingQueuedDraft = typeof composerDraftTarget === "string" && !isLocalDraftThread;
     const storedDraft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget);
-    const draft = draftModelSelectionApplies(storedDraft, threadHasStarted(activeThread))
-      ? storedDraft
-      : null;
+    const draft =
+      isEditingQueuedDraft ||
+      draftModelSelectionApplies(storedDraft, threadHasStarted(activeThread))
+        ? storedDraft
+        : null;
     const shownInstanceId =
       draft?.activeProvider ??
       activeRuntime?.providerInstanceId ??
@@ -191,25 +194,27 @@ export function useComposerSelection(input: ComposerSelectionInput) {
         shownSelection.model === resolvedModel)
     ) {
       // Re-picking the shown model keeps its options and saves it again if that save failed.
-      if (resolvedModel && !isLocalDraftThread) applyThreadModelPick(composerDraftTarget);
+      if (resolvedModel && !isLocalDraftThread && !isEditingQueuedDraft) {
+        applyThreadModelPick(composerDraftTarget);
+      }
       if (options?.focusComposer !== false) scheduleComposerFocus();
       return;
     }
     const rememberedOptions =
       useComposerDraftStore.getState().stickyOptionsByModelByProvider[instanceId]?.[resolvedModel];
-    const threadSelection = activeThread.modelSelection;
+    const baseSelection = isEditingQueuedDraft ? shownSelection : activeThread.modelSelection;
     // This pick replaces the stored options, so the thread's own model carries them over.
     const pickOptions =
       rememberedOptions !== undefined && rememberedOptions.length > 0
         ? rememberedOptions
-        : threadSelection.instanceId === instanceId &&
+        : baseSelection.instanceId === instanceId &&
             entry !== undefined &&
             isSameModel(
               { providers: providerStatuses, selectedProvider: entry.driver, settings },
-              threadSelection,
+              baseSelection,
               { instanceId, model: resolvedModel },
             )
-          ? threadSelection.options
+          ? baseSelection.options
           : undefined;
     const nextModelSelection: ModelSelection =
       pickOptions !== undefined && pickOptions.length > 0
@@ -235,8 +240,10 @@ export function useComposerSelection(input: ComposerSelectionInput) {
       explicit: true,
       replaceOptions: true,
     });
-    setStickyComposerModelSelection(nextModelSelection);
-    if (!isLocalDraftThread) applyThreadModelPick(composerDraftTarget);
+    if (!isEditingQueuedDraft) {
+      setStickyComposerModelSelection(nextModelSelection);
+      if (!isLocalDraftThread) applyThreadModelPick(composerDraftTarget);
+    }
     if (options?.focusComposer !== false) scheduleComposerFocus();
   };
   const onProviderModelSelectStable = useStableCallback(onProviderModelSelect);

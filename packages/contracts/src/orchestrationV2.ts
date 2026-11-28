@@ -811,6 +811,16 @@ export type OrchestrationV2ThreadLaunchWorkspaceStrategy =
 
 export const ORCHESTRATION_V2_WORKSPACE_PREPARATION_FAILURE_CODE = "workspace_preparation_failed";
 
+export const OrchestrationV2QueueHoldReason = Schema.Literals([
+  "stop",
+  "failure",
+  "worktree",
+  "start_after",
+  "edit",
+  "stop_before",
+]);
+export type OrchestrationV2QueueHoldReason = typeof OrchestrationV2QueueHoldReason.Type;
+
 /** What a run returned as data: a value the server accepted against the run's `outputSchema`. */
 export const OrchestrationV2RunOutput = Schema.Struct({
   value: Schema.Json,
@@ -832,6 +842,7 @@ export const OrchestrationV2Run = Schema.Struct({
   status: OrchestrationV2RunStatus,
   queuePosition: Schema.optional(Schema.NullOr(PositiveInt)),
   queueHeld: Schema.optional(Schema.Boolean),
+  queueHoldReasons: Schema.optional(Schema.Array(OrchestrationV2QueueHoldReason)),
   /** The sender asked for a separate turn; it is not an ordering barrier for a later auto send. */
   explicitQueue: Schema.optional(Schema.Literal(true)),
   steerWhenReadyRunId: Schema.optional(RunId),
@@ -3733,6 +3744,21 @@ export const OrchestrationV2Command = Schema.Union([
     beforeRunId: Schema.NullOr(RunId),
   }),
   Schema.Struct({
+    type: Schema.Literal("queued-run.hold"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: RunId,
+    reason: Schema.optional(OrchestrationV2QueueHoldReason),
+    held: Schema.Boolean,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("queued-run.merge"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    targetRunId: RunId,
+    sourceRunId: RunId,
+  }),
+  Schema.Struct({
     type: Schema.Literal("queued-run.cancel"),
     commandId: CommandId,
     threadId: ThreadId,
@@ -3740,7 +3766,6 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("queued-run.edit"),
-    modelSelection: Schema.optional(ModelSelection),
     context: Schema.optional(OrchestrationMessageContext),
     commandId: CommandId,
     threadId: ThreadId,
@@ -3748,6 +3773,8 @@ export const OrchestrationV2Command = Schema.Union([
     text: Schema.String,
     // Replaces all attachments; absent preserves them for older clients editing text.
     attachments: Schema.optional(Schema.Array(ChatAttachment)),
+    // Replaces the queued run's frozen model/provider selection when omitted preserves it.
+    modelSelection: Schema.optional(ModelSelection),
   }),
   Schema.Struct({
     type: Schema.Literal("runtime-request.respond"),

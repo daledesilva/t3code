@@ -7,9 +7,11 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  resolveComposerContextImplication,
   resolveHandoffEndpoints,
   resolveModelSwitchChange,
   resolvePendingHandoff,
+  resolveQueuedRunSelectionDiffs,
   type HandoffTimelineRun,
 } from "./handoff.ts";
 
@@ -172,6 +174,345 @@ describe("pending context handoff", () => {
     expect(
       resolvePendingHandoff(projection, { instanceId: to, model: "target" }, providers),
     ).toBeNull();
+  });
+
+  it("compares against the tail of the queue when afterQueue is set", () => {
+    const withQueue = {
+      ...projection,
+      runs: [
+        ...projection.runs,
+        {
+          ...projection.runs[0]!,
+          ...run("queued-1", 2, from, "source"),
+          status: "queued" as const,
+          queuePosition: 1,
+          startedAt: null,
+          userMessageId: "msg:1",
+        },
+        {
+          ...projection.runs[0]!,
+          ...run("queued-2", 3, to, "destination"),
+          status: "queued" as const,
+          queuePosition: 2,
+          startedAt: null,
+          userMessageId: "msg:2",
+        },
+      ],
+    } as unknown as OrchestrationV2ThreadProjection;
+
+    // Composer matches queue tail (to): no duplicate pending handoff below the queue.
+    expect(
+      resolvePendingHandoff(withQueue, { instanceId: to, model: "destination" }, [], {
+        afterQueue: true,
+      }),
+    ).toBeNull();
+    // Composer returns to `from`: pending handoff compares against queue tail (`to`).
+    expect(
+      resolvePendingHandoff(withQueue, { instanceId: from, model: "source" }, [], {
+        afterQueue: true,
+      }),
+    ).toEqual({
+      from: [{ instanceId: to, model: "destination" }],
+      to: { instanceId: from, model: "source" },
+    });
+  });
+});
+
+describe("queued run selection diffs", () => {
+  const codex = ProviderInstanceId.make("codex_personal");
+  const claude = ProviderInstanceId.make("claudeAgent");
+  const codexAlt = ProviderInstanceId.make("codex_work");
+  const providers = [
+    {
+      instanceId: codex,
+      driver: "codex",
+      continuation: { groupKey: "codex-shared" },
+      models: [
+        {
+          slug: "gpt-5.4",
+          name: "GPT-5.4",
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "reasoningEffort",
+                type: "select",
+                role: "reasoning",
+                options: [
+                  { id: "medium", label: "Medium", isDefault: true },
+                  { id: "high", label: "High" },
+                ],
+              },
+            ],
+          },
+        },
+        {
+          slug: "gpt-5.4-mini",
+          name: "GPT-5.4 Mini",
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "reasoningEffort",
+                type: "select",
+                role: "reasoning",
+                options: [
+                  { id: "medium", label: "Medium", isDefault: true },
+                  { id: "high", label: "High" },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      instanceId: codexAlt,
+      driver: "codex",
+      continuation: { groupKey: "codex-shared" },
+      models: [{ slug: "gpt-5.4", name: "GPT-5.4", capabilities: null }],
+    },
+    {
+      instanceId: claude,
+      driver: "claudeAgent",
+      models: [
+        {
+          slug: "claude-opus-4-6",
+          name: "Claude Opus 4.6",
+          capabilities: {
+            optionDescriptors: [
+              {
+                id: "effort",
+                type: "select",
+                role: "reasoning",
+                options: [
+                  { id: "medium", label: "Medium", isDefault: true },
+                  { id: "high", label: "High" },
+                ],
+              },
+            ],
+          },
+        },
+        {
+          slug: "gpt-5.4",
+          name: "GPT-5.4",
+          capabilities: null,
+        },
+      ],
+    },
+  ] as unknown as ServerProvider[];
+
+  const baseProjection = {
+    thread: { modelSelection: { instanceId: codex, model: "gpt-5.4" } },
+    runs: [
+      {
+        ...run("active", 1, codex, "gpt-5.4"),
+        status: "running",
+        startedAt: "2026-10-11T00:00:00Z",
+        contextHandoffId: null,
+      },
+    ],
+    providerThreads: [{ providerInstanceId: codex, nativeThreadRef: { nativeId: "native:1" } }],
+  } as unknown as OrchestrationV2ThreadProjection;
+
+  it("shows only what changed and hides context implications when there are none", () => {
+    const diffs = resolveQueuedRunSelectionDiffs(
+      baseProjection,
+      [
+        // Identical to active run: no badge.
+        { run: { modelSelection: { instanceId: codex, model: "gpt-5.4" } } },
+        // Same model, thinking level changed: only effort, no context implication.
+        {
+          run: {
+            modelSelection: {
+              instanceId: codex,
+              model: "gpt-5.4",
+              options: [{ id: "reasoningEffort", value: "high" }],
+            },
+          },
+        },
+        // Same provider & thinking level, model changed: only model, no context implication.
+        {
+          run: {
+            modelSelection: {
+              instanceId: codex,
+              model: "gpt-5.4-mini",
+              options: [{ id: "reasoningEffort", value: "high" }],
+            },
+          },
+        },
+      ],
+      providers,
+    );
+
+    expect(diffs[0]).toBeNull();
+    expect(diffs[1]).toMatchObject({
+      providerChanged: false,
+      modelChanged: false,
+      effortLabel: "High",
+      speedLabel: null,
+      contextImplication: null,
+    });
+    expect(diffs[2]).toMatchObject({
+      providerChanged: false,
+      modelChanged: true,
+      effortLabel: null,
+      speedLabel: null,
+      contextImplication: null,
+    });
+  });
+
+  it("shows provider-only change for same model across providers and tracks full vs delta handoff", () => {
+    const diffs = resolveQueuedRunSelectionDiffs(
+      baseProjection,
+      [
+        // Same model, different provider (first time on claude): provider icon only + full_handoff.
+        { run: { modelSelection: { instanceId: claude, model: "gpt-5.4" } } },
+        // Return to codex (already visited): delta_handoff.
+        { run: { modelSelection: { instanceId: codex, model: "gpt-5.4" } } },
+        // Switch back to claude (now visited via item 0): delta_handoff + model + effort.
+        {
+          run: {
+            modelSelection: {
+              instanceId: claude,
+              model: "claude-opus-4-6",
+              options: [{ id: "effort", value: "high" }],
+            },
+          },
+        },
+      ],
+      providers,
+    );
+
+    expect(diffs[0]).toMatchObject({
+      providerChanged: true,
+      modelChanged: false,
+      effortLabel: null,
+      contextImplication: { kind: "full_handoff" },
+    });
+    expect(diffs[1]).toMatchObject({
+      providerChanged: true,
+      modelChanged: false,
+      contextImplication: { kind: "delta_handoff" },
+    });
+    expect(diffs[2]).toMatchObject({
+      providerChanged: true,
+      modelChanged: true,
+      effortLabel: "High",
+      contextImplication: { kind: "delta_handoff" },
+    });
+  });
+
+  it("omits context implications for same-continuation account switches and flags fresh sessions", () => {
+    const diffs = resolveQueuedRunSelectionDiffs(
+      baseProjection,
+      [
+        { run: { modelSelection: { instanceId: codexAlt, model: "gpt-5.4" } } },
+        { run: { modelSelection: { instanceId: codexAlt, model: "gpt-5.4" }, freshContext: true } },
+      ],
+      providers,
+    );
+
+    expect(diffs[0]).toMatchObject({
+      providerChanged: true,
+      modelChanged: false,
+      contextImplication: null,
+    });
+    expect(diffs[1]).toMatchObject({
+      providerChanged: false,
+      modelChanged: false,
+      contextImplication: { kind: "fresh_session" },
+    });
+  });
+
+  it("resolves composer context implications after the queue and while editing a queued prompt", () => {
+    const q1Id = RunId.make("q1");
+    const q2Id = RunId.make("q2");
+    const projection = {
+      thread: { modelSelection: { instanceId: from, model: "gpt-5.4" } },
+      visibleTurnItems: [{ id: "row-1" }],
+      providerThreads: [{ providerInstanceId: from, nativeThreadRef: "native-codex" }],
+      runs: [
+        {
+          id: RunId.make("active"),
+          ordinal: 1,
+          status: "running",
+          startedAt: "2026-01-01T00:00:00.000Z",
+          contextHandoffId: null,
+          providerInstanceId: from,
+          modelSelection: { instanceId: from, model: "gpt-5.4" },
+          userMessageId: "m-active",
+        },
+        {
+          id: q1Id,
+          ordinal: 2,
+          queuePosition: 1,
+          status: "queued",
+          startedAt: null,
+          contextHandoffId: null,
+          providerInstanceId: to,
+          modelSelection: { instanceId: to, model: "claude-opus-4-6" },
+          userMessageId: "m-q1",
+        },
+        {
+          id: q2Id,
+          ordinal: 3,
+          queuePosition: 2,
+          status: "queued",
+          startedAt: null,
+          contextHandoffId: null,
+          providerInstanceId: from,
+          modelSelection: { instanceId: from, model: "gpt-5.4" },
+          userMessageId: "m-q2",
+        },
+      ],
+      messages: [],
+    } as unknown as OrchestrationV2ThreadProjection;
+
+    // After the queue (tail is `from`), switching back to `to` (visited by q1) is a delta handoff.
+    expect(
+      resolveComposerContextImplication(
+        projection,
+        { instanceId: to, model: "claude-sonnet-4-6" },
+        [],
+      ),
+    ).toEqual({
+      kind: "delta_handoff",
+      from: { instanceId: from, model: "gpt-5.4" },
+      to: { instanceId: to, model: "claude-sonnet-4-6" },
+    });
+
+    // Staying on the tail's provider has no context implication.
+    expect(
+      resolveComposerContextImplication(
+        projection,
+        { instanceId: from, model: "gpt-5.4-mini" },
+        [],
+      ),
+    ).toBeNull();
+
+    // Fresh session armed (/clear) reports fresh_session even on the same provider.
+    expect(
+      resolveComposerContextImplication(projection, { instanceId: from, model: "gpt-5.4" }, [], {
+        freshSessionPending: true,
+      }),
+    ).toEqual({
+      kind: "fresh_session",
+      from: { instanceId: from, model: "gpt-5.4" },
+      to: { instanceId: from, model: "gpt-5.4" },
+    });
+
+    // Editing q1 compares against the active run (before q1), so switching to `to` is a full handoff.
+    expect(
+      resolveComposerContextImplication(
+        projection,
+        { instanceId: to, model: "claude-opus-4-6" },
+        [],
+        { editingRunId: q1Id },
+      ),
+    ).toEqual({
+      kind: "full_handoff",
+      from: { instanceId: from, model: "gpt-5.4" },
+      to: { instanceId: to, model: "claude-opus-4-6" },
+    });
   });
 });
 

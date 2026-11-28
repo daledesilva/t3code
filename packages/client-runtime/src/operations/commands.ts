@@ -15,6 +15,7 @@ import {
   type NodeId,
   type OrchestrationV2Command,
   type OrchestrationV2CreationSource,
+  type OrchestrationV2QueueHoldReason,
   type PlanId,
   type ProjectId,
   type ProjectIconOverride,
@@ -276,14 +277,30 @@ export interface CancelQueuedRunInput extends ThreadCommandInput {
   readonly runId: RunId;
 }
 
+export interface ReorderQueuedRunInput extends ThreadCommandInput {
+  readonly runId: RunId;
+  readonly beforeRunId: RunId | null;
+}
+
+export interface HoldQueuedRunInput extends ThreadCommandInput {
+  readonly runId: RunId;
+  readonly reason?: OrchestrationV2QueueHoldReason;
+  readonly held: boolean;
+}
+
+export interface MergeQueuedRunsInput extends ThreadCommandInput {
+  readonly targetRunId: RunId;
+  readonly sourceRunId: RunId;
+}
+
 export interface RetryWorkspacePreparationInput extends ThreadCommandInput {
   readonly runId: RunId;
 }
 
 export interface EditQueuedRunInput extends ThreadCommandInput {
-  readonly modelSelection?: ModelSelection;
   readonly runId: RunId;
   readonly text: string;
+  readonly modelSelection?: ModelSelection;
   /**
    * Full replacement attachment list for the queued message. Omitted =
    * text-only edit that leaves attachments untouched.
@@ -1203,6 +1220,43 @@ export const cancelQueuedRun = Effect.fn("EnvironmentCommands.cancelQueuedRun")(
   });
 });
 
+export const reorderQueuedRun = Effect.fn("EnvironmentCommands.reorderQueuedRun")(function* (
+  input: ReorderQueuedRunInput,
+) {
+  return yield* dispatch({
+    type: "queued-run.reorder",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    runId: input.runId,
+    beforeRunId: input.beforeRunId,
+  });
+});
+
+export const holdQueuedRun = Effect.fn("EnvironmentCommands.holdQueuedRun")(function* (
+  input: HoldQueuedRunInput,
+) {
+  return yield* dispatch({
+    type: "queued-run.hold",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    runId: input.runId,
+    ...(input.reason === undefined ? {} : { reason: input.reason }),
+    held: input.held,
+  });
+});
+
+export const mergeQueuedRuns = Effect.fn("EnvironmentCommands.mergeQueuedRuns")(function* (
+  input: MergeQueuedRunsInput,
+) {
+  return yield* dispatch({
+    type: "queued-run.merge",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    targetRunId: input.targetRunId,
+    sourceRunId: input.sourceRunId,
+  });
+});
+
 export const retryWorkspacePreparation = Effect.fn("EnvironmentCommands.retryWorkspacePreparation")(
   function* (input: RetryWorkspacePreparationInput) {
     return yield* dispatch({
@@ -1227,7 +1281,7 @@ export const editQueuedRun = Effect.fn("EnvironmentCommands.editQueuedRun")(func
     threadId: input.threadId,
     runId: input.runId,
     text: input.text,
-    ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
+    ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
     ...(attachments === undefined ? {} : { attachments }),
     ...(input.edit?.context && attachments
       ? {

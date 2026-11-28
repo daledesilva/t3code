@@ -41,6 +41,7 @@ import {
   deriveEffectiveComposerModelState,
   queuedRunEditDraftId,
   useComposerDraftStore,
+  type ComposerThreadTarget,
 } from "../../composerDraftStore";
 import { AppAtomRegistryProvider, appAtomRegistry } from "../../rpc/atomRegistry";
 import { useComposerSelection } from "./useComposerSelection";
@@ -83,11 +84,15 @@ function Picker(props: {
   thread: EnvironmentThreadShell;
   runtime: Parameters<typeof useComposerSelection>[0]["activeRuntime"];
   model?: string;
+  composerDraftTarget?: ComposerThreadTarget;
   draftTarget?: Parameters<typeof useComposerSelection>[0]["composerDraftTarget"];
 }) {
   const { onProviderModelSelectStable } = useComposerSelection({
     environmentId,
-    composerDraftTarget: props.draftTarget ?? scopeThreadRef(environmentId, props.thread.id),
+    composerDraftTarget:
+      props.composerDraftTarget ??
+      props.draftTarget ??
+      scopeThreadRef(environmentId, props.thread.id),
     draftThread: null,
     activeThread: props.thread,
     activeRuntime: props.runtime,
@@ -218,14 +223,19 @@ it("keeps a queued edit's model pick in its own draft", async () => {
   const thread = cursorThread("thread-queued-edit");
   const threadRef = scopeThreadRef(environmentId, thread.id);
   const draftTarget = queuedRunEditDraftId(threadRef, RunId.make("queued-run"));
+  appAtomRegistry.set(shellAtom(thread.id), thread);
   await using _screen = await render(
-    <Picker thread={thread} runtime={null} model="auto-smart" draftTarget={draftTarget} />,
+    <AppAtomRegistryProvider>
+      <Picker thread={thread} runtime={null} model="auto-smart" draftTarget={draftTarget} />
+    </AppAtomRegistryProvider>,
   );
   await page.getByRole("button", { name: "Pick the model" }).click();
-  const store = useComposerDraftStore.getState();
-  expect(store.getComposerDraft(draftTarget)?.modelSelectionByProvider[cursor]?.model).toBe(
-    "auto-smart",
-  );
-  expect(store.getComposerDraft(threadRef)).toBeNull();
+  await vi.waitFor(() => {
+    const store = useComposerDraftStore.getState();
+    expect(store.getComposerDraft(draftTarget)?.modelSelectionByProvider[cursor]).toEqual(
+      createModelSelection(cursor, "auto-smart"),
+    );
+    expect(store.getComposerDraft(threadRef)).toBeNull();
+  });
   expect(setModelSelection).not.toHaveBeenCalled();
 });

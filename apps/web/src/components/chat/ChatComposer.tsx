@@ -1,3 +1,4 @@
+import type { QueuedRunContextImplication } from "@t3tools/client-runtime/handoff";
 import { copySnapshot } from "./copySnapshot";
 import { VoiceInputSetup } from "./VoiceInputSetup";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
@@ -257,7 +258,7 @@ import { observeResize } from "~/lib/observeResize";
 const isEnvironmentRequestInvalidError = Schema.is(EnvironmentRequestInvalidError);
 import { toastManager } from "../ui/toast";
 import { m as resolveMessage } from "../../i18n/messages";
-import { BuildingIcon, PlayIcon, ReplyIcon } from "lucide-react";
+import { BuildingIcon, PauseIcon, PlayIcon, ReplyIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { assistantCitationLabel } from "@t3tools/shared/assistantCitations";
 import { assistantCitationNavigation } from "../../lib/assistantCitationNavigation";
@@ -448,6 +449,7 @@ export interface ChatComposerProps {
   activeProjectDefaultModelSelection: ModelSelection | null | undefined;
   activeThreadModelSelection: ModelSelection | null | undefined;
   reportedModelSelection?: ModelSelection | null;
+  contextImplication?: QueuedRunContextImplication | null | undefined;
   activeProjectId: ProjectId | null;
   projectName?: string | undefined;
 
@@ -481,6 +483,8 @@ export interface ChatComposerProps {
     readonly url: string | null;
     readonly contextIds?: ReadonlyArray<ComposerContextId> | undefined;
   }> | null;
+  isPausedOnEditingQueuedMessage?: boolean;
+  onCancelQueuedEdit?: () => void;
   removedEditingQueuedAttachments?: ReadonlyArray<QueuedAttachmentContextBinding> | undefined;
   onRemoveEditingQueuedAttachment: (attachmentId: string) => void;
   onRestoreEditingQueuedAttachment?: ((attachment: ContractChatAttachment) => void) | undefined;
@@ -624,6 +628,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onExpandImage,
     onFileOpen,
     editingQueuedAttachments,
+    isPausedOnEditingQueuedMessage = false,
+    contextImplication = null,
+    onCancelQueuedEdit,
     removedEditingQueuedAttachments,
     onRemoveEditingQueuedAttachment,
     onRestoreEditingQueuedAttachment,
@@ -1298,7 +1305,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const isChoiceOnlyPendingQuestion =
     activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
-  const showComposerTopDrawer = pendingUserInputs.length > 0;
+  const showComposerTopDrawer =
+    pendingUserInputs.length > 0 || (!isComposerCollapsedMobile && isEditingQueuedMessage);
   const showCollapsedMobilePromptRow = isComposerCollapsedMobile;
   const showComposerAttachAction =
     fileStagingLimit !== null &&
@@ -2717,6 +2725,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         routeKind={typeof composerDraftTarget === "string" ? "draft" : routeKind}
         routeThreadRef={routeThreadRef}
         draftId={typeof composerDraftTarget === "string" ? composerDraftTarget : draftId}
+        composerDraftTarget={composerDraftTarget}
+        isEditingQueuedMessage={isEditingQueuedMessage}
+        contextImplication={contextImplication}
         selectedProvider={selectedProvider}
         selectedInstanceId={selectedInstanceId}
         selectedModel={selectedModel}
@@ -3392,7 +3403,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       },
       openModelPicker: openModelPickerStable,
       stepReasoningEffort: (direction) => {
-        if (noProviderAvailable || pendingUserInputs.length > 0 || isEditingQueuedMessage) {
+        if (noProviderAvailable || pendingUserInputs.length > 0) {
           return;
         }
         const change = getComposerReasoningStep({
@@ -3401,7 +3412,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           model: selectedModel,
           models: selectedProviderModels,
           modelOptions: composerModelOptions?.[selectedInstanceId],
-          reportedModelSelection,
+          reportedModelSelection: isEditingQueuedMessage ? null : reportedModelSelection,
           prompt: promptRef.current,
           cursor: readComposerSnapshotStable().expandedCursor,
           direction,
@@ -3412,9 +3423,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           .setProviderModelOptions(composerDraftTarget, selectedProvider, change.modelOptions, {
             instanceId: selectedInstanceId,
             model: selectedModel,
-            persistSticky: true,
+            persistSticky: !isEditingQueuedMessage,
           });
-        applyThreadModelPick(composerDraftTarget);
+        if (!isEditingQueuedMessage) applyThreadModelPick(composerDraftTarget);
         if (change.prompt !== promptRef.current) {
           applyPromptReplacementStable(0, promptRef.current.length, change.prompt, {
             expandedCursorAfterReplace: change.cursor,
@@ -3756,6 +3767,44 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onAdvance={onAdvanceActivePendingUserInput}
                     onDismiss={onDismissActivePendingUserInput}
                   />
+                ) : !isComposerCollapsedMobile && isEditingQueuedMessage ? (
+                  <ComposerBanner.Row data-testid="composer-queued-edit-pause-notice">
+                    <ComposerBanner.Icon
+                      className={
+                        isPausedOnEditingQueuedMessage ? "text-success-foreground" : undefined
+                      }
+                    >
+                      <PauseIcon />
+                    </ComposerBanner.Icon>
+                    <ComposerBanner.Content>
+                      <span
+                        className={cn(
+                          "min-w-0 flex-1 truncate",
+                          isPausedOnEditingQueuedMessage ? "text-white" : "text-muted-foreground",
+                        )}
+                      >
+                        {isPausedOnEditingQueuedMessage
+                          ? gt(
+                              "The thread is paused until you save, cancel, or reorder this prompt.",
+                            )
+                          : gt(
+                              "The AI will pause once it reaches this prompt if it is still being edited.",
+                            )}
+                      </span>
+                    </ComposerBanner.Content>
+                    {onCancelQueuedEdit ? (
+                      <ComposerBanner.Actions>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          aria-label={gt("Cancel editing queued message")}
+                          onClick={onCancelQueuedEdit}
+                        >
+                          {gt("Cancel")}
+                        </Button>
+                      </ComposerBanner.Actions>
+                    ) : null}
+                  </ComposerBanner.Row>
                 ) : null}
               </ComposerBanner.Root>
             </ComposerBanner.Attachment>

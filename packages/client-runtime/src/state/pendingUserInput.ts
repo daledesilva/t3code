@@ -79,17 +79,16 @@ export function resolvePendingUserInputAnswer(
   }
 
   const selectedOptionValues = normalizeSelectedOptionValues(question, draft?.selectedOptionValues);
+  const fallback =
+    customAnswer ??
+    (question.allowCustomAnswer !== false && (draft?.attachmentCount ?? 0) > 0 ? "" : null);
   if (question.multiSelect) {
+    // Checking nothing answers "none of these" unless the provider requires a choice.
     return selectedOptionValues.length > 0
       ? selectedOptionValues
-      : (customAnswer ??
-          (question.allowCustomAnswer !== false && (draft?.attachmentCount ?? 0) > 0 ? "" : null));
+      : (fallback ?? (question.required ? null : []));
   }
-  return (
-    selectedOptionValues[0] ??
-    customAnswer ??
-    (question.allowCustomAnswer !== false && (draft?.attachmentCount ?? 0) > 0 ? "" : null)
-  );
+  return selectedOptionValues[0] ?? fallback;
 }
 
 export function setPendingUserInputCustomAnswer(
@@ -170,7 +169,10 @@ function retainedOtherText(draft: PendingUserInputDraftAnswer | undefined): stri
     : draft?.retainedCustomAnswer;
 }
 
-/** Every question's answer keyed by question id, or null while any is unanswered. */
+/**
+ * The answers to submit keyed by question id, or null while a question still needs one.
+ * An optional single choice left unselected is skipped: it gets no entry.
+ */
 export function buildPendingUserInputAnswers(
   questions: ReadonlyArray<PendingUserInputQuestion>,
   draftAnswers: Record<string, PendingUserInputDraftAnswer>,
@@ -178,8 +180,10 @@ export function buildPendingUserInputAnswers(
   const entries: Array<[string, PendingUserInputAnswer]> = [];
 
   for (const question of questions) {
-    const answer = resolvePendingUserInputAnswer(question, draftAnswers[question.id]);
+    const draft = draftAnswers[question.id];
+    const answer = resolvePendingUserInputAnswer(question, draft);
     if (answer === null) {
+      if (question.required === false && !draft?.attachmentsBlocked) continue;
       return null;
     }
     entries.push([question.id, answer]);
@@ -208,7 +212,9 @@ export function questionHasSubmittableAnswer(
   question: PendingUserInputQuestion,
   draft: PendingUserInputDraftAnswer | undefined,
 ): boolean {
+  if (draft?.attachmentsBlocked) return false;
   if (resolvePendingUserInputAnswer(question, draft) !== null) return true;
+  if (question.required === false) return true;
   return activeCustomQuestionAnswer(question, draft) !== null;
 }
 
@@ -233,9 +239,13 @@ export function formatQueuedQuestionAnswers(
 ): string | null {
   const parts: string[] = [];
   for (const question of questions) {
-    const custom = activeCustomQuestionAnswer(question, draftAnswers[question.id]);
-    const resolved = custom ?? resolvePendingUserInputAnswer(question, draftAnswers[question.id]);
-    if (resolved === null) return null;
+    const draft = draftAnswers[question.id];
+    const custom = activeCustomQuestionAnswer(question, draft);
+    const resolved = custom ?? resolvePendingUserInputAnswer(question, draft);
+    if (resolved === null) {
+      if (question.required === false && !draft?.attachmentsBlocked) continue;
+      return null;
+    }
     if (resolved === "") {
       parts.push(question.question);
       continue;

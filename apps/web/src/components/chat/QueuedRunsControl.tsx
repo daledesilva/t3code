@@ -99,6 +99,10 @@ import { TimelineRowTimestamp } from "./TimelineRowParts";
 import { TimelineSystemDivider } from "./TimelineSystemDivider";
 import { FoldedMessageHeader, useScheduledTaskTitle } from "./TimelineUserMessageRow";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
+import {
+  QueuedRunInlineComposer,
+  type QueuedRunInlineEditorContext,
+} from "./QueuedRunInlineComposer";
 
 export interface EditQueuedRunRequest {
   readonly runId: RunId;
@@ -142,9 +146,10 @@ export function QueuedRunsControl({
     Pick<ChatMessage, "id" | "inputIntent" | "text" | "attachments">
   >;
   readonly editingRunId: RunId | null;
-  /** Set while something else holds the composer, such as an open question. */
+  /** Set while editing is unavailable (for example, a read-only connection). */
   readonly editBlockedReason: string | null;
   readonly onEditQueuedRun: (request: EditQueuedRunRequest) => void;
+  readonly inlineEditor?: QueuedRunInlineEditorContext | null;
   readonly timestampFormat: TimestampFormat;
   readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
   readonly onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -371,7 +376,13 @@ export function QueuedRunsControl({
   };
 
   const collapsible = items.length > QUEUE_VISIBLE_ROWS;
-  const visibleItems = collapsible && !showAll ? items.slice(0, QUEUE_VISIBLE_ROWS - 1) : items;
+  const editingItemHidden =
+    props.editingRunId !== null &&
+    collapsible &&
+    !showAll &&
+    !items.slice(0, QUEUE_VISIBLE_ROWS - 1).some((item) => item.runId === props.editingRunId);
+  const visibleItems =
+    collapsible && !showAll && !editingItemHidden ? items.slice(0, QUEUE_VISIBLE_ROWS - 1) : items;
   const canReorder = queued.length > 1;
   const sortableIds = visibleItems.map((item) => item.key);
 
@@ -383,7 +394,7 @@ export function QueuedRunsControl({
       )}
       data-thread-queue="true"
       // Anchors the sr-only live region; unanchored, it escapes the timeline scroller and makes the chat column scroll.
-      className="relative mx-auto flex w-full max-w-(--chat-content-max-width) flex-col gap-2 pb-4"
+      className="relative mx-auto flex w-full max-w-(--chat-content-max-width) flex-col gap-2 pt-8 pb-4"
     >
       <span className="sr-only" aria-live="polite">
         {gt("{count, plural, one {{count} queued} other {{count} queued}}", {
@@ -601,48 +612,61 @@ export function QueuedRunsControl({
                     total={items.length}
                     isEditing={isEditing}
                     canReorder={canReorder}
-                    disabled={item.runId === null || busyRunId !== null}
+                    disabled={item.runId === null || busyRunId !== null || isEditing}
                   >
-                    {({ reorder }) => (
-                      <QueuedMessage
-                        environmentId={props.environmentId}
-                        providers={providers}
-                        selectionDiff={item.selectionDiff}
-                        message={item.message}
-                        previewText={previewText}
-                        thumbnails={item.thumbnails}
-                        isEditing={isEditing}
-                        timestampFormat={props.timestampFormat}
-                        onOpenThread={props.onOpenThread}
-                        onEdit={editQueuedMessage}
-                        onImageExpand={props.onImageExpand}
-                        editLabel={
-                          props.editBlockedReason ??
-                          (item.serverIndex === queued.length - 1 && props.editShortcutLabel
-                            ? gt("Edit in the composer ({shortcut})", {
-                                shortcut: props.editShortcutLabel,
-                              })
-                            : gt("Edit in the composer"))
-                        }
-                        leadingControl={sendNowControl}
-                        reorder={reorder}
-                        footerLeading={mergeControl}
-                        stopAfterControl={stopAfterControl}
-                        removeControl={removeControl}
-                      >
-                        {item.pending ? (
-                          <span className="flex items-center gap-1 px-1">
-                            <Clock3Icon aria-hidden className="size-3" />
-                            <T>Saving</T>
-                          </span>
-                        ) : null}
-                        {isEditing ? (
-                          <span className="px-1 text-foreground">
-                            <T>Editing in the composer</T>
-                          </span>
-                        ) : null}
-                      </QueuedMessage>
-                    )}
+                    {({ reorder }) =>
+                      isEditing &&
+                      item.runId !== null &&
+                      props.inlineEditor &&
+                      props.inlineEditor.editDraftTarget !== null ? (
+                        <QueuedRunInlineComposer
+                          key={item.runId}
+                          environmentId={props.environmentId}
+                          runId={item.runId}
+                          draftTarget={props.inlineEditor.editDraftTarget}
+                          isPausedOnEditing={
+                            item.serverIndex === 0 &&
+                            activeRun === null &&
+                            props.inlineEditor.phase !== "running"
+                          }
+                          editorContext={props.inlineEditor}
+                        />
+                      ) : (
+                        <QueuedMessage
+                          environmentId={props.environmentId}
+                          providers={providers}
+                          selectionDiff={item.selectionDiff}
+                          message={item.message}
+                          previewText={previewText}
+                          thumbnails={item.thumbnails}
+                          isEditing={isEditing}
+                          timestampFormat={props.timestampFormat}
+                          onOpenThread={props.onOpenThread}
+                          onEdit={editQueuedMessage}
+                          onImageExpand={props.onImageExpand}
+                          editLabel={
+                            props.editBlockedReason ??
+                            (item.serverIndex === queued.length - 1 && props.editShortcutLabel
+                              ? gt("Edit queued message ({shortcut})", {
+                                  shortcut: props.editShortcutLabel,
+                                })
+                              : gt("Edit queued message"))
+                          }
+                          leadingControl={sendNowControl}
+                          reorder={reorder}
+                          footerLeading={mergeControl}
+                          stopAfterControl={stopAfterControl}
+                          removeControl={removeControl}
+                        >
+                          {item.pending ? (
+                            <span className="flex items-center gap-1 px-1">
+                              <Clock3Icon aria-hidden className="size-3" />
+                              <T>Saving</T>
+                            </span>
+                          ) : null}
+                        </QueuedMessage>
+                      )
+                    }
                   </SortableQueuedMessageItem>
                 </Fragment>
               );

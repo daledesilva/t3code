@@ -199,6 +199,7 @@ export interface ComposerPromptEditorProps {
   /** Rendered after the placeholder text, such as a key hint. */
   placeholderSuffix?: ReactNode;
   ariaLabel?: string | undefined;
+  testId?: string | undefined;
   suggestionListId?: string | undefined;
   activeSuggestionId?: string | undefined;
   isPathQueryActive?: () => boolean;
@@ -1058,6 +1059,7 @@ function ComposerPromptEditorTiptapInner(
     className,
     placeholderClassName,
     placeholderSuffix,
+    testId = "composer-editor",
     onChange,
     onVisibleSelectionChange,
     onCommandKeyDown,
@@ -1209,7 +1211,7 @@ function ComposerPromptEditorTiptapInner(
       "composer-tiptap -m-1 block max-h-52 min-h-[calc(2lh+--spacing(2))] overflow-y-auto p-1 whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none",
       className,
     ),
-    "data-testid": "composer-editor",
+    "data-testid": testId,
     "data-composer-rich-text": richText ? "true" : "false",
     role: "textbox",
     "aria-multiline": "true",
@@ -2134,7 +2136,7 @@ function ComposerPromptEditorTiptapInner(
                 }
                 if (event.key !== "PageUp" && event.key !== "PageDown") return;
                 const target = event.currentTarget.querySelector(
-                  '[data-testid="composer-editor"]',
+                  `[data-testid="${testId}"]`,
                 ) as HTMLElement | null;
                 if (!target) return;
                 const pageScrollKey = getTimelinePageScrollKey({

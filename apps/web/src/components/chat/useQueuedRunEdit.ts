@@ -31,7 +31,6 @@ import {
   stripAttachmentOnlyBootstrapPrompt,
 } from "@t3tools/shared/composerContextReferences";
 import { Atom } from "effect/reactivity";
-import type { RefObject } from "react";
 import { useAssetUrls } from "../../assets/assetUrls";
 import {
   queuedRunEditDraftId,
@@ -39,6 +38,7 @@ import {
   type ComposerFileAttachment,
   type ComposerImageAttachment,
   type ComposerThreadTarget,
+  type DraftId,
 } from "../../composerDraftStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import {
@@ -66,7 +66,6 @@ import {
 } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { stackedThreadToast, toastManager } from "../ui/toast";
-import type { ChatComposerHandle } from "./ChatComposer";
 import { fileAttachmentCapabilityBlockReason } from "./composerAttachmentFiles";
 import { composerDraftContentChanged } from "./composerSend.logic";
 import {
@@ -95,7 +94,7 @@ const queuedRunEdits = makeQueuedRunEditStore<EditingQueuedRun>({
   label: "web-queued-run-edits",
 });
 
-interface QueuedRunEditContent {
+export interface QueuedRunEditContent {
   readonly modelSelection: ModelSelection;
   readonly prompt: string;
   readonly images: ReadonlyArray<ComposerImageAttachment>;
@@ -221,19 +220,9 @@ export function useQueuedRunEdit(input: {
   readonly threadDraftTarget: ComposerThreadTarget;
   readonly activeThreadId: ThreadId | null;
   readonly serverProjection: ThreadStructure | null;
-  readonly promptRef: { current: string };
-  readonly composerRef: RefObject<ChatComposerHandle | null>;
 }) {
-  const {
-    environmentId,
-    routeThreadRef,
-    currentRouteThreadKeyRef,
-    threadDraftTarget,
-    activeThreadId,
-    serverProjection,
-    promptRef,
-    composerRef,
-  } = input;
+  const { environmentId, routeThreadRef, threadDraftTarget, activeThreadId, serverProjection } =
+    input;
   const editQueuedRunCommand = useEditQueuedRunCommand();
   const holdQueuedRunCommand = useHoldQueuedRunCommand();
   const promoteQueuedRun = useAtomCommand(threadEnvironment.promoteQueuedRun);
@@ -241,8 +230,8 @@ export function useQueuedRunEdit(input: {
   const storedEdit = useAtomValue(queuedRunEdits.atom)[editKey] ?? null;
   const editing = activeThreadId === null ? null : storedEdit;
   const isSaving = useAtomValue(queuedRunEdits.savingAtom)[editKey] === true;
-  const draftTarget =
-    editing === null ? threadDraftTarget : queuedRunEditDraftId(routeThreadRef, editing.runId);
+  const editDraftTarget: DraftId | null =
+    editing === null ? null : queuedRunEditDraftId(routeThreadRef, editing.runId);
 
   const imageResources = (editing?.existingAttachments ?? [])
     .filter((attachment) => attachment.type === "image")
@@ -280,11 +269,6 @@ export function useQueuedRunEdit(input: {
             contextIds: attachmentContextIds(attachment),
           }));
 
-  const focusComposerSoon = () => {
-    window.requestAnimationFrame(() => {
-      if (currentRouteThreadKeyRef.current === editKey) composerRef.current?.focusAtEnd();
-    });
-  };
   const clearEditDraft = (runId: RunId) => {
     const target = queuedRunEditDraftId(routeThreadRef, runId);
     // A save in flight still sends these uploads.
@@ -418,7 +402,6 @@ export function useQueuedRunEdit(input: {
         },
       },
     );
-    focusComposerSoon();
   });
   const cancelEdit = useStableCallback(() => {
     if (editing === null) return;
@@ -434,7 +417,6 @@ export function useQueuedRunEdit(input: {
         held: false,
       },
     });
-    focusComposerSoon();
   });
   const removeEditingAttachment = useStableCallback((attachmentId: string) => {
     const removed = editing?.existingAttachments.find(
@@ -506,7 +488,7 @@ export function useQueuedRunEdit(input: {
       readonly submissionIntent: ComposerSubmissionIntent;
     },
   ) => {
-    if (editing === null || isSaving) return;
+    if (editing === null || editDraftTarget === null || isSaving) return;
     const newAttachments = [...content.images, ...content.files];
     if (
       editing.existingAttachments.length + newAttachments.length >
@@ -532,18 +514,19 @@ export function useQueuedRunEdit(input: {
     // The save's result decides the edit's fate, even if the run starts meanwhile.
     const finishSave = queuedRunEdits.startSave(editKey);
     if (finishSave === null) return;
-    const draftBeforeSave = useComposerDraftStore.getState().getComposerDraft(draftTarget);
+    const draftBeforeSave = useComposerDraftStore.getState().getComposerDraft(editDraftTarget);
     const draftChanged = () =>
       appAtomRegistry.get(queuedRunEdits.atom)[editKey] !== editing ||
       draftBeforeSave?.modelSelectionByProvider !==
-        useComposerDraftStore.getState().getComposerDraft(draftTarget)?.modelSelectionByProvider ||
+        useComposerDraftStore.getState().getComposerDraft(editDraftTarget)
+          ?.modelSelectionByProvider ||
       composerDraftContentChanged(
         draftBeforeSave,
-        useComposerDraftStore.getState().getComposerDraft(draftTarget),
+        useComposerDraftStore.getState().getComposerDraft(editDraftTarget),
       );
     const error = await submitQueuedRunEdit({
       environmentId,
-      draftTarget,
+      draftTarget: editDraftTarget,
       editing,
       content,
       ...(!editing.followsThreadSelection || draftBeforeSave?.modelSelectionExplicit
@@ -585,11 +568,6 @@ export function useQueuedRunEdit(input: {
     if (changedAfterSave) return;
     releaseDraftAttachments(newAttachments);
     clearEditDraft(editing.runId);
-    if (currentRouteThreadKeyRef.current === editKey) {
-      promptRef.current = "";
-      composerRef.current?.resetCursorState();
-      focusComposerSoon();
-    }
     // A plain submit means "Update queued message"; only the opposite-action shortcut or
     // modifier-click asks to steer, as it does for a new follow-up.
     if (submission?.submissionIntent === "alternate" && submission.dispatchMode === "steer") {
@@ -601,7 +579,7 @@ export function useQueuedRunEdit(input: {
     editingRunId: editing?.runId ?? null,
     isEditing: editing !== null,
     isSaving,
-    draftTarget,
+    editDraftTarget,
     editingAttachments,
     removedEditingAttachments,
     beginEdit,

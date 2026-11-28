@@ -18,7 +18,7 @@ import * as Option from "effect/Option";
 import { AsyncResult, type Atom, AtomRegistry } from "effect/reactivity";
 import { Profiler, useState, type ComponentProps } from "react";
 import { expect, it, vi } from "vite-plus/test";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 const state = vi.hoisted(() => ({
   threadState: null as unknown as Atom.Writable<AsyncResult.AsyncResult<EnvironmentThreadState>>,
@@ -51,8 +51,8 @@ vi.mock(import("../../state/environments"), async (importOriginal) => ({
 
 vi.mock(import("../../state/query"), async (importOriginal) => ({
   ...(await importOriginal()),
-  useEnvironmentQuery: (() => ({
-    data: { tasks: [{ id: "task:webhook", title: "PR dispatcher" }] },
+  useEnvironmentQuery: ((atom: unknown) => ({
+    data: atom === null ? undefined : { tasks: [{ id: "task:webhook", title: "PR dispatcher" }] },
   })) as never,
 }));
 
@@ -93,6 +93,11 @@ vi.mock(import("../../state/threads"), async (importOriginal) => {
 vi.mock(import("../../state/use-atom-command"), async (importOriginal) => ({
   ...(await importOriginal()),
   useAtomCommand: (() => state.commands) as never,
+}));
+
+vi.mock(import("../../state/session"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  readEnvironmentScope: (() => true) as never,
 }));
 
 vi.mock(import("../../assets/assetUrls"), async (importOriginal) => ({
@@ -761,4 +766,245 @@ it("adds and cancels a Stops here divider between queued items", async () => {
   await expect.element(page.getByText("Queue interrupted", { exact: true })).toBeVisible();
   await expect.element(page.getByText(/Stopped by user/)).toBeVisible();
   await expect.element(page.getByText("Stops here", { exact: true })).not.toBeInTheDocument();
+});
+
+it("turns a clicked queued item into a full-width inline composer with save, cancel, and Escape", async () => {
+  setup();
+  const { ProviderInstanceId, RunId } = await import("@t3tools/contracts");
+  const { DEFAULT_RESOLVED_KEYBINDINGS } = await import("@t3tools/shared/keybindings");
+  const { DEFAULT_UNIFIED_SETTINGS } = await import("@t3tools/contracts/settings");
+  const { queuedRunEditDraftId, useComposerDraftStore } = await import("../../composerDraftStore");
+  const { scopeThreadRef } = await import("@t3tools/client-runtime/environment");
+  const codex = ProviderInstanceId.make("codex");
+  const claude = ProviderInstanceId.make("claudeAgent");
+  const runId = RunId.make("run:inline");
+  const queuedModelSelection = { instanceId: claude, model: "claude-opus-4-6" };
+  const routeThreadRef = scopeThreadRef(baseProps.environmentId, baseProps.threadId);
+  const editTarget = queuedRunEditDraftId(routeThreadRef, runId);
+  const base = makeThreadProjectionFixture();
+  const providers = [
+    {
+      instanceId: codex,
+      driver: "codex" as const,
+      displayName: "Codex",
+      enabled: true,
+      status: "ready" as const,
+      installed: true,
+      auth: { status: "authenticated" as const },
+      checkedAt: "2026-10-27T12:00:00.000Z",
+      models: [
+        {
+          slug: "gpt-5.4",
+          name: "GPT-5.4",
+          isCustom: false,
+          capabilities: null,
+        },
+      ],
+      slashCommands: [],
+      skills: [],
+    },
+    {
+      instanceId: claude,
+      driver: "claudeAgent" as const,
+      displayName: "Claude",
+      enabled: true,
+      status: "ready" as const,
+      installed: true,
+      auth: { status: "authenticated" as const },
+      checkedAt: "2026-10-27T12:00:00.000Z",
+      models: [
+        {
+          slug: "claude-opus-4-6",
+          name: "Claude Opus 4.6",
+          shortName: "Opus 4.6",
+          isCustom: false,
+          capabilities: null,
+        },
+      ],
+      slashCommands: [],
+      skills: [],
+    },
+  ];
+  const registry = AtomRegistry.make();
+  await using stack = new AsyncDisposableStack();
+  stack.defer(() => registry.dispose());
+  registry.set(state.providers, providers);
+  state.workflow = {
+    activeRun: { id: "run:active" },
+    canPromoteToSteer: true,
+    queuedRuns: [
+      {
+        run: {
+          id: runId,
+          userMessageId: MessageId.make("message:inline"),
+          modelSelection: queuedModelSelection,
+        },
+        text: "Original queued prompt",
+        attachments: [],
+      },
+    ],
+  };
+
+  const onSaveEdit = vi.fn<(...args: ReadonlyArray<unknown>) => Promise<void>>(
+    async () => undefined,
+  );
+  const onCancelEdit = vi.fn();
+
+  function Harness() {
+    const [editingRunId, setEditingRunId] = useState<typeof runId | null>(null);
+    return (
+      <div style={{ width: 700 }}>
+        <QueuedRunsControl
+          {...baseProps}
+          editingRunId={editingRunId}
+          onEditQueuedRun={(request) => {
+            const store = useComposerDraftStore.getState();
+            store.clearComposerContent(editTarget);
+            store.setPrompt(editTarget, request.text);
+            if (request.modelSelection) {
+              store.setModelSelection(editTarget, request.modelSelection, {
+                explicit: true,
+                replaceOptions: true,
+              });
+            }
+            setEditingRunId(request.runId);
+          }}
+          inlineEditor={{
+            editDraftTarget: editingRunId ? editTarget : null,
+            editingAttachments: editingRunId ? [] : null,
+            isSaving: false,
+            onCancelEdit: () => {
+              onCancelEdit();
+              setEditingRunId(null);
+            },
+            onRemoveAttachment: () => undefined,
+            onSaveEdit: async (content, setThreadError, submission) => {
+              await onSaveEdit(content, setThreadError, submission);
+              setEditingRunId(null);
+            },
+            routeThreadRef,
+            activeThread: {
+              ...base.thread,
+              environmentId: baseProps.environmentId,
+              modelSelection: { instanceId: codex, model: "gpt-5.4" },
+              runtime: null,
+              latestRun: null,
+            } as never,
+            activeThreadRuns: base.runs,
+            promptHistoryEntries: [],
+            activeRuntime: null,
+            activeProjectId: base.thread.projectId,
+            activeProjectName: "Test project",
+            activeProjectDefaultModelSelection: null,
+            serverProjection: base,
+            providerStatuses: providers as never,
+            providerCatalogKnown: true,
+            lockedProvider: null,
+            supportsProviderSwitchingViaHandoff: true,
+            canOperateThread: true,
+            attachmentUploadsCapabilityKnown: true,
+            supportsAttachmentUploads: true,
+            maxFileAttachmentBytes: 10 * 1024 * 1024,
+            environmentUnavailable: null,
+            canSteer: true,
+            phase: "running",
+            resolvedTheme: "dark",
+            settings: DEFAULT_UNIFIED_SETTINGS,
+            keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
+            getShortcutContext: () =>
+              ({
+                terminalFocus: false,
+                terminalOpen: false,
+                previewFocus: false,
+                previewOpen: false,
+                rightPanelOpen: false,
+                editableFocus: true,
+                composerFocus: false,
+                draftThreadRoute: false,
+                turnRunning: true,
+                composerRequiresModifier: false,
+                isWeb: true,
+                isDesktop: false,
+              }) as never,
+            gitCwd: null,
+            pullRequestProjectId: null,
+            pullRequestRepository: null,
+            threadPullRequests: undefined,
+            setThreadError: () => undefined,
+            onExpandImage: () => undefined,
+            onFileOpen: () => undefined,
+          }}
+        />
+      </div>
+    );
+  }
+
+  const screen = await renderUi(
+    <RegistryContext.Provider value={registry}>
+      <Harness />
+    </RegistryContext.Provider>,
+  );
+  stack.use(screen);
+
+  const section = screen.container.querySelector('[data-thread-queue="true"]') as HTMLElement;
+  const bubble = page.getByRole("button", { name: "Edit queued message", exact: true });
+  await expect.element(bubble).toBeVisible();
+  const bubbleWidth = bubble.element().getBoundingClientRect().width;
+  expect(bubbleWidth).toBeLessThan(section.getBoundingClientRect().width);
+
+  // Clicking the bubble replaces it in place with the full-width inline composer.
+  await bubble.click();
+  const inlineComposer = screen.container.querySelector(
+    '[data-slot="queued-inline-composer"]',
+  ) as HTMLElement;
+  expect(inlineComposer).not.toBeNull();
+  expect(inlineComposer.getBoundingClientRect().width).toBeCloseTo(
+    section.getBoundingClientRect().width,
+    0,
+  );
+  await expect.element(page.getByTestId("composer-queued-edit-pause-notice")).toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: "Attach files", exact: true }))
+    .toBeVisible();
+  const cancelButton = page.getByRole("button", {
+    name: "Cancel editing queued message",
+    exact: true,
+  });
+  await expect.element(cancelButton).toHaveTextContent("Cancel editing");
+  const inlineEditor = page.getByTestId("queued-run-composer-editor");
+  await expect.element(inlineEditor).toBeVisible();
+  expect(screen.container.querySelector('[data-testid="composer-editor"]')).toBeNull();
+
+  // Clicking Cancel editing in the top notification chip discards the inline composer and restores the bubble.
+  await cancelButton.click();
+  expect(onCancelEdit).toHaveBeenCalledOnce();
+  await expect.element(bubble).toBeVisible();
+
+  // Re-opening and pressing Escape also cancels.
+  await bubble.click();
+  await expect.element(inlineEditor).toBeVisible();
+  await inlineEditor.click();
+  await userEvent.keyboard("{Escape}");
+  expect(onCancelEdit).toHaveBeenCalledTimes(2);
+  await expect.element(bubble).toBeVisible();
+
+  // Re-opening, editing text, and clicking Update saves with the updated text and modelSelection.
+  await bubble.click();
+  await expect.element(inlineEditor).toBeVisible();
+  await inlineEditor.click();
+  await userEvent.keyboard(" updated");
+  await page.getByRole("button", { name: "Update queued message", exact: true }).click();
+  await vi.waitFor(() => expect(onSaveEdit).toHaveBeenCalledOnce());
+  expect(onSaveEdit).toHaveBeenCalledWith(
+    expect.objectContaining({
+      prompt: "Original queued prompt updated",
+      modelSelection: expect.objectContaining({
+        instanceId: claude,
+        model: "claude-opus-4-6",
+      }),
+    }),
+    expect.any(Function),
+    expect.objectContaining({ submissionIntent: "foreground" }),
+  );
+  await expect.element(bubble).toBeVisible();
 });

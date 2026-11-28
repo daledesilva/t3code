@@ -478,7 +478,8 @@ export interface ChatComposerProps {
   onPageScrollKeyUp: (key: string) => void;
   onPageScrollRelease: () => void;
 
-  editingQueuedAttachments: ReadonlyArray<{
+  editorTestId?: string;
+  editingQueuedAttachments?: ReadonlyArray<{
     readonly attachment: ContractChatAttachment;
     readonly url: string | null;
     readonly contextIds?: ReadonlyArray<ComposerContextId> | undefined;
@@ -486,7 +487,7 @@ export interface ChatComposerProps {
   isPausedOnEditingQueuedMessage?: boolean;
   onCancelQueuedEdit?: () => void;
   removedEditingQueuedAttachments?: ReadonlyArray<QueuedAttachmentContextBinding> | undefined;
-  onRemoveEditingQueuedAttachment: (attachmentId: string) => void;
+  onRemoveEditingQueuedAttachment?: (attachmentId: string) => void;
   onRestoreEditingQueuedAttachment?: ((attachment: ContractChatAttachment) => void) | undefined;
 
   onCompactContext: () => void;
@@ -627,7 +628,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setThreadError,
     onExpandImage,
     onFileOpen,
-    editingQueuedAttachments,
+    editorTestId = "composer-editor",
+    editingQueuedAttachments = null,
     isPausedOnEditingQueuedMessage = false,
     contextImplication = null,
     onCancelQueuedEdit,
@@ -1876,7 +1878,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       addComposerDraftFiles(attachmentDraftTarget, attachmentChanges.filesToRestore);
     }
     for (const attachmentId of attachmentChanges.queuedAttachmentIdsToRemove) {
-      onRemoveEditingQueuedAttachment(attachmentId);
+      onRemoveEditingQueuedAttachment?.(attachmentId);
     }
     for (const attachment of attachmentChanges.queuedAttachmentsToRestore) {
       onRestoreEditingQueuedAttachment?.(attachment);
@@ -2073,7 +2075,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     disabled: dictationDisabled,
     terminalOpen,
     modelPickerOpen: isComposerModelPickerOpen,
-    ...(backgroundThread ? { targetRef: composerFormRef } : {}),
+    ...(backgroundThread || isEditingQueuedMessage ? { targetRef: composerFormRef } : {}),
   });
 
   const resolveActiveComposerTrigger = (): {
@@ -2575,7 +2577,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Escape dismisses the suggestion so Tab moves focus again.
   const { suggestion: promptSuggestion, dismiss: dismissPromptSuggestion } = usePromptSuggestion(
     environmentId,
-    activeThread,
+    isEditingQueuedMessage ? undefined : activeThread,
     activeThreadRuns,
   );
   // After /clear the next message starts a fresh session that cannot see what the suggestion refers to.
@@ -2590,7 +2592,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     !isComposerApprovalState &&
     !activePendingProgress &&
     !projectSelectionRequired &&
-    !showProviderUnavailable
+    !showProviderUnavailable &&
+    !isEditingQueuedMessage
       ? promptSuggestion
       : null;
 
@@ -2637,6 +2640,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       submitComposer,
       promptSuggestion: offeredPromptSuggestion,
       dismissPromptSuggestion,
+      onEscape: isEditingQueuedMessage ? onCancelQueuedEdit : undefined,
     })(key, event, isTaskItem);
   };
 
@@ -3699,7 +3703,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         const activeElement = event.target;
         if (
           activeElement instanceof Element &&
-          activeElement.closest('[data-testid="composer-editor"]')
+          activeElement.closest(`[data-testid="${editorTestId}"]`)
         ) {
           onTypingGuardFocus();
         }
@@ -3718,7 +3722,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onBlurCapture={(event) => {
         if (
           event.target instanceof Element &&
-          event.target.closest('[data-testid="composer-editor"]')
+          event.target.closest(`[data-testid="${editorTestId}"]`)
         ) {
           onTypingGuardBlur();
         }
@@ -3780,7 +3784,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       <span
                         className={cn(
                           "min-w-0 flex-1 truncate",
-                          isPausedOnEditingQueuedMessage ? "text-white" : "text-muted-foreground",
+                          isPausedOnEditingQueuedMessage
+                            ? "text-foreground"
+                            : "text-muted-foreground",
                         )}
                       >
                         {isPausedOnEditingQueuedMessage
@@ -3800,7 +3806,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           aria-label={gt("Cancel editing queued message")}
                           onClick={onCancelQueuedEdit}
                         >
-                          {gt("Cancel")}
+                          {gt("Cancel editing")}
                         </Button>
                       </ComposerBanner.Actions>
                     ) : null}
@@ -3810,12 +3816,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             </ComposerBanner.Attachment>
           ) : null}
         </ComposerBanner.Column>
-        <ComposerStashBadge
-          count={stashQueue.length}
-          menuOpen={isStashMenuOpen}
-          pulseKey={stashPulseKey}
-          onToggleMenu={toggleStashMenuStable}
-        />
+        {!isEditingQueuedMessage ? (
+          <ComposerStashBadge
+            count={stashQueue.length}
+            menuOpen={isStashMenuOpen}
+            pulseKey={stashPulseKey}
+            onToggleMenu={toggleStashMenuStable}
+          />
+        ) : null}
       </ComposerBanner.Dock>
       {showComposerAttachAction ? (
         <ComposerAttachInput
@@ -3985,7 +3993,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
               {!isComposerCollapsedMobile &&
                 activeEditingQueuedAttachments !== null &&
-                activeEditingQueuedAttachments.length > 0 && (
+                activeEditingQueuedAttachments.length > 0 &&
+                onRemoveEditingQueuedAttachment && (
                   <ComposerQueuedAttachmentRow
                     attachments={activeEditingQueuedAttachments}
                     onRemove={onRemoveEditingQueuedAttachment}
@@ -4012,6 +4021,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 <ComposerContextActionsContext value={composerContextActions}>
                   <ComposerPromptEditor
                     draftKey={composerDraftTargetKey}
+                    testId={editorTestId}
                     // Switching threads lands focus here, so the label names the thread.
                     ariaLabel={
                       activeThread

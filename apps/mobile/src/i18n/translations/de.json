@@ -1732,6 +1732,7 @@
   "5521de0732509b7c": "Neueste Änderungen werden gepullt",
   "adb9c574404d1db8": "Bereits auf dem neuesten Stand",
   "84964b49287ced17": "Neuester Stand auf {branch} gepullt",
+  "15b815a63cf39441": "Die Antwort konnte nicht eingereiht werden",
   "439fbd498ad5aba1": "Anhänge sind nicht bereit",
   "f928da494821aeb0": "Warte, bis die Uploads abgeschlossen sind, oder wiederhole fehlgeschlagene Uploads.",
   "4c7966190fc234b4": "Zu viele Kontextelemente",
@@ -4549,7 +4550,7 @@
     " · Läuft eigenständig"
   ],
   "6f2479ee100ebe84": "Zu viele Anhänge.",
-  "01ae9b8989442ac6": "Oder gib eine eigene Antwort ein",
+  "78344b60f407928e": "Sonstiges",
   "802a10810a7f044e": "{host} öffnen",
   "9fac16daf3b3ab10": "Wert",
   "9605dc349bd2c872": "Referenz für {label} in {source}",

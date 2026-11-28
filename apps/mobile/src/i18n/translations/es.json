@@ -1732,6 +1732,7 @@
   "5521de0732509b7c": "Haciendo pull de los últimos cambios",
   "adb9c574404d1db8": "Ya está actualizado",
   "84964b49287ced17": "Pull de los últimos cambios en {branch} completado",
+  "15b815a63cf39441": "No se pudo poner la respuesta en cola",
   "439fbd498ad5aba1": "Los adjuntos no están listos",
   "f928da494821aeb0": "Espera a que terminen las subidas o reintenta las fallidas.",
   "4c7966190fc234b4": "Demasiados elementos de contexto",
@@ -4542,7 +4543,7 @@
     " · Funciona por su cuenta"
   ],
   "6f2479ee100ebe84": "Demasiados adjuntos.",
-  "01ae9b8989442ac6": "O escribe una respuesta personalizada",
+  "78344b60f407928e": "Otros",
   "802a10810a7f044e": "Abrir {host}",
   "9fac16daf3b3ab10": "Valor",
   "9605dc349bd2c872": "Referencia de {label} en {source}",

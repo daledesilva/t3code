@@ -11,6 +11,8 @@ export interface PendingUserInputQuestion {
 export interface PendingUserInputDraftAnswer {
   readonly selectedOptionValues?: ReadonlyArray<string>;
   readonly customAnswer?: string;
+  /** Text kept in the Other field after an offered option is selected. */
+  readonly retainedCustomAnswer?: string;
   readonly attachmentCount?: number;
   readonly attachmentsBlocked?: boolean;
 }
@@ -94,16 +96,13 @@ export function setPendingUserInputCustomAnswer(
   draft: PendingUserInputDraftAnswer | undefined,
   customAnswer: string,
 ): PendingUserInputDraftAnswer {
-  if (question.allowCustomAnswer === false) {
-    return draft ?? {};
-  }
-
   const selectedOptionValues =
     question.initialAnswer !== undefined || customAnswer.trim().length > 0
       ? undefined
       : normalizeSelectedOptionValues(question, draft?.selectedOptionValues);
   return {
     customAnswer,
+    ...(customAnswer.trim().length > 0 ? { retainedCustomAnswer: customAnswer } : {}),
     ...(selectedOptionValues && selectedOptionValues.length > 0 ? { selectedOptionValues } : {}),
   };
 }
@@ -137,6 +136,7 @@ export function togglePendingUserInputOptionSelection(
     return draft ?? {};
   }
 
+  const retainedCustomAnswer = retainedOtherText(draft);
   if (question.multiSelect) {
     const selectedOptionValues = normalizeSelectedOptionValues(
       question,
@@ -148,6 +148,7 @@ export function togglePendingUserInputOptionSelection(
 
     return {
       customAnswer: "",
+      ...(retainedCustomAnswer === undefined ? {} : { retainedCustomAnswer }),
       ...(nextSelectedOptionValues.length > 0
         ? { selectedOptionValues: nextSelectedOptionValues }
         : {}),
@@ -156,8 +157,16 @@ export function togglePendingUserInputOptionSelection(
 
   return {
     customAnswer: "",
+    ...(retainedCustomAnswer === undefined ? {} : { retainedCustomAnswer }),
     selectedOptionValues: [resolvedOptionValue],
   };
+}
+
+function retainedOtherText(draft: PendingUserInputDraftAnswer | undefined): string | undefined {
+  if (normalizeDraftAnswer(draft?.customAnswer) !== null) return draft?.customAnswer;
+  return normalizeDraftAnswer(draft?.retainedCustomAnswer) === null
+    ? undefined
+    : draft?.retainedCustomAnswer;
 }
 
 /**
@@ -181,4 +190,105 @@ export function buildPendingUserInputAnswers(
   }
 
   return Object.fromEntries(entries);
+}
+
+/** The Other text that should be sent instead of an offered option, if the user is answering that way. */
+export function activeCustomQuestionAnswer(
+  question: PendingUserInputQuestion,
+  draft: PendingUserInputDraftAnswer | undefined,
+): string | null {
+  const custom = normalizeDraftAnswer(draft?.customAnswer);
+  if (custom === null) return null;
+  if (
+    question.allowCustomAnswer === false &&
+    normalizeSelectedOptionValues(question, draft?.selectedOptionValues).length > 0
+  ) {
+    return null;
+  }
+  return custom;
+}
+
+export function questionHasSubmittableAnswer(
+  question: PendingUserInputQuestion,
+  draft: PendingUserInputDraftAnswer | undefined,
+): boolean {
+  if (draft?.attachmentsBlocked) return false;
+  if (resolvePendingUserInputAnswer(question, draft) !== null) return true;
+  if (question.required === false) return true;
+  return activeCustomQuestionAnswer(question, draft) !== null;
+}
+
+export function questionSetUsesCustomAnswer(
+  questions: ReadonlyArray<PendingUserInputQuestion>,
+  draftAnswers: Record<string, PendingUserInputDraftAnswer>,
+): boolean {
+  return questions.some(
+    (question) => activeCustomQuestionAnswer(question, draftAnswers[question.id]) !== null,
+  );
+}
+
+function optionAnswerLabel(question: PendingUserInputQuestion, value: string): string {
+  const option = question.options.find((entry) => (entry.value ?? entry.label) === value);
+  return option?.label ?? value;
+}
+
+/** Question and answer pairs for a follow-up message, or null while any question is unanswered. */
+export function formatQueuedQuestionAnswers(
+  questions: ReadonlyArray<PendingUserInputQuestion & { readonly question: string }>,
+  draftAnswers: Record<string, PendingUserInputDraftAnswer>,
+): string | null {
+  const parts: string[] = [];
+  for (const question of questions) {
+    const draft = draftAnswers[question.id];
+    const custom = activeCustomQuestionAnswer(question, draft);
+    const resolved = custom ?? resolvePendingUserInputAnswer(question, draft);
+    if (resolved === null) {
+      if (question.required === false && !draft?.attachmentsBlocked) continue;
+      return null;
+    }
+    if (resolved === "") {
+      parts.push(question.question);
+      continue;
+    }
+    const labels = typeof resolved === "string" ? [resolved] : resolved;
+    const answer = custom ?? labels.map((value) => optionAnswerLabel(question, value)).join(", ");
+    parts.push(`${question.question}\n${answer}`);
+  }
+  return parts.join("\n\n");
+}
+
+/** The unanswered question a steer or model handoff must carry, or null when there is nothing to carry. */
+export function unansweredQuestionTakeoverText(
+  questions: ReadonlyArray<{
+    readonly header?: string | undefined;
+    readonly question: string;
+    readonly options: ReadonlyArray<{
+      readonly label: string;
+      readonly description?: string | undefined;
+    }>;
+  }>,
+): string | null {
+  if (questions.length === 0) return null;
+  const body = questions
+    .map((question) => {
+      const options = question.options
+        .map((option) =>
+          option.description && option.description !== option.label
+            ? `- ${option.label}: ${option.description}`
+            : `- ${option.label}`,
+        )
+        .join("\n");
+      return [question.header, question.question, options]
+        .filter((line) => (line ?? "").length > 0)
+        .join("\n");
+    })
+    .join("\n\n");
+  // oxlint-disable-next-line t3code/no-untranslated-copy -- message sent to the agent
+  return `The assistant asked a question that was not answered. This message takes over that turn.\n\n${body}`;
+}
+
+/** Text still shown in Other after an offered option takes over the answer. */
+export function visibleOtherAnswer(draft: PendingUserInputDraftAnswer | undefined): string {
+  if ((draft?.customAnswer ?? "").length > 0) return draft?.customAnswer ?? "";
+  return draft?.retainedCustomAnswer ?? "";
 }

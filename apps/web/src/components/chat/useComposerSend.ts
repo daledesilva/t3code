@@ -35,6 +35,7 @@ import {
   ProviderInteractionMode,
   RuntimeMode,
 } from "@t3tools/contracts";
+import { unansweredQuestionTakeoverText } from "@t3tools/client-runtime/state/pending-user-input";
 import { wasBootstrapThreadDeleted } from "@t3tools/client-runtime/errors";
 import {
   declinePendingApprovals,
@@ -156,6 +157,7 @@ import type { SessionPhase } from "../../types";
 import type { DraftSessionState } from "../../composerDraftStore";
 import type { ComposerHandleRef } from "../../composerHandleContext";
 import type { useLogicalProjectEnvironments } from "../../hooks/useLogicalProjectEnvironments";
+import type { PendingUserInput } from "../../session-logic";
 import type { useDraftEnvironmentRouting } from "./useDraftEnvironmentRouting";
 import type { useLocalDispatchState } from "./useLocalDispatchState";
 import type { usePendingThreadRequests } from "./usePendingThreadRequests";
@@ -265,8 +267,10 @@ interface ComposerSendInput {
   readonly readPendingEnvironmentChange: DraftEnvironmentRouting["readPendingEnvironmentChange"];
   readonly pendingApprovals: PendingThreadRequests["pendingApprovals"];
   readonly respondingRequestIds: PendingThreadRequests["respondingRequestIds"];
-  readonly activePendingUserInput: PendingThreadRequests["activePendingUserInput"];
-  readonly onAdvanceActivePendingUserInput: PendingThreadRequests["onAdvanceActivePendingUserInput"];
+  readonly pendingQuestion: PendingUserInput | null;
+  readonly onDismissPendingQuestion: (
+    requestId: PendingUserInput["requestId"],
+  ) => Promise<unknown> | unknown;
   readonly onRespondToApproval: PendingThreadRequests["onRespondToApproval"];
   readonly beginLocalDispatch: LocalDispatchState["beginLocalDispatch"];
   readonly resetLocalDispatch: LocalDispatchState["resetLocalDispatch"];
@@ -363,8 +367,8 @@ export function useComposerSend(input: ComposerSendInput) {
     readPendingEnvironmentChange,
     pendingApprovals,
     respondingRequestIds,
-    activePendingUserInput,
-    onAdvanceActivePendingUserInput,
+    pendingQuestion,
+    onDismissPendingQuestion,
     onRespondToApproval: onRespondToApprovalStable,
     beginLocalDispatch,
     resetLocalDispatch,
@@ -466,23 +470,11 @@ export function useComposerSend(input: ComposerSendInput) {
       ? detachedOverride.sendContext
       : composerRef.current?.getSendContext();
     const isCurrentRouteThread = () => currentRouteThreadKeyRef.current === routeThreadKey;
-    // `/side` beats an open question and a plan follow-up, which would send the text to main.
+    // `/side` beats an open question, which would send the text to main.
     const sideChatCommand =
       sendCtx && !directAnnotation && !queuedRunEdit.isEditing
         ? parseSideChatCommand(promptAtSend)
         : null;
-    const answeringQuestion =
-      Boolean(activePendingUserInput) && sendCtx?.answeringPendingUserInput !== false;
-    const startsSideChat =
-      onSideChat !== undefined && sideChatCommand !== null && sideChatDisabledReason === null;
-    // An answer responds to the open request rather than starting a turn, so the new-message
-    // guards below (loading, busy, provider) must not swallow it.
-    if (answeringQuestion && !startsSideChat && !directAnnotation) {
-      if (readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) && activeThread) {
-        onAdvanceActivePendingUserInput();
-      }
-      return;
-    }
 
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;
@@ -551,7 +543,7 @@ export function useComposerSend(input: ComposerSendInput) {
       return;
     }
     // Where side chats are unavailable, `/side` text can still be a literal answer.
-    if (sideChatDisabledReason !== null && sideChatCommand && !answeringQuestion) {
+    if (sideChatDisabledReason !== null && sideChatCommand) {
       toastManager.add(
         stackedThreadToast({
           type: "warning",
@@ -750,14 +742,6 @@ export function useComposerSend(input: ComposerSendInput) {
         }
         composerRef.current?.resetCursorState();
       }
-      return;
-    }
-    if (answeringQuestion) {
-      if (directAnnotation) {
-        notifyDirectAnnotationAttached();
-        return;
-      }
-      onAdvanceActivePendingUserInput();
       return;
     }
     if (!sendCtx?.providerAvailable) {
@@ -1110,12 +1094,19 @@ export function useComposerSend(input: ComposerSendInput) {
     );
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
+    const takesOverQuestion =
+      pendingQuestion !== null && (turnDispatchMode === "steer" || turnDispatchMode === "restart");
+    const takeoverText = takesOverQuestion
+      ? unansweredQuestionTakeoverText(pendingQuestion.questions)
+      : null;
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,
       effort: ctxSelectedPromptEffort,
-      text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+      text: [takeoverText, messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT]
+        .filter((part) => part !== null && part.length > 0)
+        .join("\n\n"),
     });
     if (
       isCurrentRouteThread() &&
@@ -1586,6 +1577,9 @@ export function useComposerSend(input: ComposerSendInput) {
           )
         : null;
       if (backgroundThreadRef) beginBackgroundDraftSubmissionByRef(backgroundThreadRef);
+      if (takesOverQuestion && pendingQuestion) {
+        await onDismissPendingQuestion(pendingQuestion.requestId);
+      }
       const startPromise = startThreadTurn({
         environmentId,
         input: {

@@ -1,12 +1,13 @@
 import { type RuntimeRequestId, type ScopedThreadRef } from "@t3tools/contracts";
 import { markdownProseDirection, textDirection } from "~/textDirection";
 import { useGT } from "gt-react";
-import { memo, use, useEffect, useEffectEvent, useRef, useState } from "react";
+import { memo, use, useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
 import { BackgroundThreadContext } from "./backgroundThread";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { type PendingUserInput } from "../../session-logic";
 import type { PendingUserInputDraftAnswer } from "@t3tools/client-runtime/state/pending-user-input";
 import { derivePendingUserInputProgress } from "../../pendingUserInput";
+import { Button } from "../ui/button";
 import { CheckboxMark } from "../ui/checkbox";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Kbd } from "../ui/kbd";
@@ -25,8 +26,12 @@ interface PendingUserInputPanelProps {
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
   onToggleOption: (questionId: string, optionValue: string) => void;
+  onChangeCustomAnswer?: (questionId: string, value: string) => void;
   onAdvance: () => void;
+  onPrevious?: () => void;
   onDismiss: (requestId: RuntimeRequestId) => void;
+  /** True when this key should submit the Other field. Defaults to unmodified Enter. */
+  submitOnKeyDown?: (event: KeyboardEvent) => boolean;
 }
 
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
@@ -38,8 +43,11 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
   answers,
   questionIndex,
   onToggleOption,
+  onChangeCustomAnswer,
   onAdvance,
+  onPrevious,
   onDismiss,
+  submitOnKeyDown,
 }: PendingUserInputPanelProps) {
   if (pendingUserInputs.length === 0) return null;
   const activePrompt = pendingUserInputs[0];
@@ -56,8 +64,11 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       answers={answers}
       questionIndex={questionIndex}
       onToggleOption={onToggleOption}
+      onChangeCustomAnswer={onChangeCustomAnswer}
       onAdvance={onAdvance}
+      onPrevious={onPrevious}
       onDismiss={onDismiss}
+      submitOnKeyDown={submitOnKeyDown}
     />
   );
 });
@@ -71,8 +82,11 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   answers,
   questionIndex,
   onToggleOption,
+  onChangeCustomAnswer,
   onAdvance,
+  onPrevious,
   onDismiss,
+  submitOnKeyDown,
 }: {
   prompt: PendingUserInput;
   cwd: string | undefined;
@@ -82,8 +96,11 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
   onToggleOption: (questionId: string, optionValue: string) => void;
+  onChangeCustomAnswer?: ((questionId: string, value: string) => void) | undefined;
   onAdvance: () => void;
+  onPrevious?: (() => void) | undefined;
   onDismiss: (requestId: RuntimeRequestId) => void;
+  submitOnKeyDown?: ((event: KeyboardEvent) => boolean) | undefined;
 }) {
   const gt = useGT();
   // Message-mode requests remain answerable after their provider turn ends.
@@ -99,7 +116,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   // Keep question identity stable for its shortcut listener.
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
-  const customAnswerActive = progress.customAnswer.trim().length > 0;
+  const customAnswerActive = progress.usingCustomAnswer;
+  const otherInputRef = useRef<HTMLTextAreaElement | null>(null);
   // Read before later hooks to preserve the question's compiler cache.
   const draftSelectedOptions = activeQuestion?.options.map(
     (option) =>
@@ -168,7 +186,15 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       const digit = Number.parseInt(event.key, 10);
       if (Number.isNaN(digit) || digit < 1 || digit > 9) return;
       const optionIndex = digit - 1;
-      if (optionIndex >= activeQuestion.options.length) return;
+      if (
+        optionIndex === activeQuestion.options.length &&
+        activeQuestion.allowCustomAnswer !== false
+      ) {
+        event.preventDefault();
+        otherInputRef.current?.focus();
+        return;
+      }
+      if (optionIndex > activeQuestion.options.length) return;
       const option = activeQuestion.options[optionIndex];
       if (!option) return;
       event.preventDefault();
@@ -344,6 +370,51 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   </div>
                 );
               })}
+              {activeQuestion.allowCustomAnswer !== false ? (
+                <OtherAnswerField
+                  questionId={activeQuestion.id}
+                  value={progress.customAnswer}
+                  selected={customAnswerActive}
+                  disabled={disabled || isResponding}
+                  shortcut={
+                    activeQuestion.options.length < 9 ? activeQuestion.options.length + 1 : null
+                  }
+                  inputRef={otherInputRef}
+                  submitOnKeyDown={submitOnKeyDown}
+                  onChange={(value) => onChangeCustomAnswer?.(activeQuestion.id, value)}
+                  onSubmit={advance}
+                />
+              ) : null}
+            </div>
+            <div className="mt-2 flex items-center justify-end gap-2 pe-1 pb-1">
+              {questionIndex > 0 ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  disabled={isResponding}
+                  onClick={onPrevious}
+                >
+                  {gt("Previous")}
+                </Button>
+              ) : null}
+              <Button
+                size="sm"
+                type="button"
+                disabled={
+                  responseDisabled ||
+                  (progress.isLastQuestion ? !progress.isComplete : !progress.canAdvance)
+                }
+                onClick={advance}
+              >
+                {isResponding
+                  ? gt("Submitting...")
+                  : progress.isLastQuestion
+                    ? questionIndex > 0
+                      ? gt("Submit answers")
+                      : gt("Submit answer")
+                    : gt("Next question")}
+              </Button>
             </div>
           </ComposerBanner.Body>
         </ComposerBanner.Scroll>
@@ -351,6 +422,85 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     </Collapsible>
   );
 });
+
+function OtherAnswerField({
+  questionId,
+  value,
+  selected,
+  disabled,
+  shortcut,
+  inputRef,
+  submitOnKeyDown,
+  onChange,
+  onSubmit,
+}: {
+  questionId: string;
+  value: string;
+  selected: boolean;
+  disabled: boolean;
+  shortcut: number | null;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
+  submitOnKeyDown?: ((event: KeyboardEvent) => boolean) | undefined;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  const gt = useGT();
+  return (
+    <div
+      className={cn(
+        "flex w-full items-start gap-2.5 rounded-md py-1.5 ps-2 sm:ps-1.5",
+        selected ? "text-foreground" : "text-foreground/70",
+        disabled && "opacity-50",
+      )}
+    >
+      <span className="pointer-events-none flex h-8 shrink-0 items-center">
+        <OptionRadio checked={selected} />
+      </span>
+      <textarea
+        ref={(element) => {
+          inputRef.current = element;
+          if (!element) return;
+          element.style.height = "0px";
+          element.style.height = `${element.scrollHeight}px`;
+        }}
+        data-pending-user-input-other={questionId}
+        value={value}
+        disabled={disabled}
+        rows={1}
+        placeholder={gt("Other")}
+        aria-label={gt("Other")}
+        className="max-h-40 min-h-8 min-w-0 flex-1 resize-none rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-placeholder focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/30 disabled:cursor-not-allowed"
+        onFocus={() => {
+          if (!selected && value.trim().length > 0) onChange(value);
+        }}
+        onChange={(event) => {
+          const element = event.currentTarget;
+          element.style.height = "0px";
+          element.style.height = `${element.scrollHeight}px`;
+          onChange(element.value);
+        }}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+          const submits =
+            submitOnKeyDown?.(event.nativeEvent) ??
+            (event.key === "Enter" &&
+              !event.shiftKey &&
+              !event.metaKey &&
+              !event.ctrlKey &&
+              !event.altKey);
+          if (!submits) return;
+          event.preventDefault();
+          onSubmit();
+        }}
+      />
+      {shortcut !== null ? (
+        <span className="flex h-8 w-7 shrink-0 items-center justify-center sm:w-6">
+          <Kbd>{shortcut}</Kbd>
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 // Drawn with ui/radio-group's look instead of using its Radio: Radio only checks inside a
 // RadioGroup, whose arrow keys select options and would trip the single-select auto-advance.

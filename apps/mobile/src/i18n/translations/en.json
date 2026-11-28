@@ -1732,6 +1732,7 @@
   "5521de0732509b7c": "Pulling latest changes",
   "adb9c574404d1db8": "Already up to date",
   "84964b49287ced17": "Pulled latest on {branch}",
+  "15b815a63cf39441": "Could not queue the answer",
   "439fbd498ad5aba1": "Attachments are not ready",
   "f928da494821aeb0": "Wait for uploads to finish, or retry failed uploads.",
   "4c7966190fc234b4": "Too many context items",
@@ -4551,7 +4552,7 @@
     " · Runs on its own"
   ],
   "6f2479ee100ebe84": "Too many attachments.",
-  "01ae9b8989442ac6": "Or type a custom answer",
+  "78344b60f407928e": "Other",
   "802a10810a7f044e": "Open {host}",
   "9fac16daf3b3ab10": "Value",
   "9605dc349bd2c872": "{label} reference in {source}",

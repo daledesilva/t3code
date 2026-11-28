@@ -1732,6 +1732,7 @@
   "5521de0732509b7c": "Pullar senaste ändringarna",
   "adb9c574404d1db8": "Redan uppdaterad",
   "84964b49287ced17": "Pullade senaste på {branch}",
+  "15b815a63cf39441": "Det gick inte att köa svaret",
   "439fbd498ad5aba1": "Bilagorna är inte klara",
   "f928da494821aeb0": "Vänta tills uppladdningarna är klara, eller försök igen med misslyckade uppladdningar.",
   "4c7966190fc234b4": "För många kontextobjekt",
@@ -4549,7 +4550,7 @@
     " · Körs på egen hand"
   ],
   "6f2479ee100ebe84": "För många bilagor.",
-  "01ae9b8989442ac6": "Eller skriv ett eget svar",
+  "78344b60f407928e": "Övrigt",
   "802a10810a7f044e": "Öppna {host}",
   "9fac16daf3b3ab10": "Värde",
   "9605dc349bd2c872": "Referens för {label} i {source}",

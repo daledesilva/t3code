@@ -17,7 +17,6 @@ import {
   collapseExpandedComposerCursor,
   composerSubmissionIntentForKey,
 } from "../../composer-logic";
-import { type PendingUserInput } from "../../session-logic";
 import { promptSuggestionToAccept } from "./usePromptSuggestion";
 import {
   type EnvironmentContextRecord,
@@ -49,7 +48,6 @@ export function composerCommandKeyHandler(input: {
   readonly followUpBehavior: ChatComposerProps["settings"]["followUpBehavior"];
   readonly isSoftwareKeyboardOpen: boolean;
   readonly isLiteralPendingAnswer: boolean;
-  readonly pendingUserInputs: ReadonlyArray<PendingUserInput>;
   readonly promptHistoryEntries: ChatComposerProps["promptHistoryEntries"];
   readonly promptHistoryPositionRef: RefObject<{
     targetKey: string;
@@ -110,7 +108,6 @@ export function composerCommandKeyHandler(input: {
     followUpBehavior,
     isSoftwareKeyboardOpen,
     isLiteralPendingAnswer,
-    pendingUserInputs,
     promptHistoryEntries,
     promptHistoryPositionRef,
     composerDraftTarget,
@@ -165,7 +162,6 @@ export function composerCommandKeyHandler(input: {
     if (event.shiftKey || event.altKey || event.metaKey || event.ctrlKey || event.isComposing) {
       return false;
     }
-    if (pendingUserInputs.length > 0) return false;
     if (
       composerImagesRef.current.length > 0 ||
       composerFilesRef.current.length > 0 ||

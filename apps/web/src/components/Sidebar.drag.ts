@@ -174,6 +174,9 @@ export function createSidebarSortingStrategy(input: {
     };
     marker("pinned-header");
     projected.push(...groups.pinned);
+    if (items.some((item) => item.kind === "marker" && item.marker === "search-header")) {
+      marker("search-header");
+    }
     marker("pinned-divider");
     section("active");
     if (items.some((item) => item.kind === "marker" && item.marker === "working-header")) {

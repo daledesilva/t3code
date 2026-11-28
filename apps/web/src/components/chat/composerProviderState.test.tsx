@@ -6,7 +6,11 @@ import {
   type ProviderOptionSelection,
   type ServerProviderModel,
 } from "@t3tools/contracts";
-import { getComposerProviderState, getComposerReasoningStep } from "./composerProviderState";
+import {
+  getComposerProviderState,
+  getComposerReasoningStep,
+  resolveComposerBottomRowMode,
+} from "./composerProviderState";
 import { readPromptUltrathink } from "./TraitsPicker";
 
 const PROVIDER: ProviderDriverKind = ProviderDriverKind.make("codex");
@@ -218,6 +222,79 @@ describe("getComposerProviderState", () => {
   });
 });
 
+describe("resolveModelSpeedMode", () => {
+  it("resolves Fast and Standard for models with a fastMode toggle", async () => {
+    const { resolveModelSpeedMode } = await import("./ComposerModelEffort");
+    expect(
+      resolveModelSpeedMode({
+        descriptors: [booleanDescriptor("fastMode", false)],
+      }),
+    ).toEqual({
+      option: { id: "fastMode", value: false },
+      label: "Standard",
+    });
+
+    expect(
+      resolveModelSpeedMode({
+        descriptors: [booleanDescriptor("fastMode", true)],
+      }),
+    ).toEqual({
+      option: { id: "fastMode", value: true },
+      label: "Fast",
+    });
+  });
+
+  it("resolves Standard, Fast, and Ultrafast for Codex models with serviceTier", async () => {
+    const { resolveModelSpeedMode } = await import("./ComposerModelEffort");
+    const serviceTier = selectDescriptor("serviceTier", [
+      { id: "default", label: "Standard", isDefault: true },
+      { id: "fast", label: "Fast" },
+      { id: "ultrafast", label: "Ultrafast" },
+    ]);
+
+    expect(
+      resolveModelSpeedMode({
+        descriptors: [serviceTier],
+      }),
+    ).toEqual({
+      option: { id: "serviceTier", value: "default" },
+      label: "Standard",
+    });
+
+    expect(
+      resolveModelSpeedMode({
+        descriptors: [{ ...serviceTier, currentValue: "fast" }],
+      }),
+    ).toEqual({
+      option: { id: "serviceTier", value: "fast" },
+      label: "Fast",
+    });
+
+    expect(
+      resolveModelSpeedMode({
+        descriptors: [{ ...serviceTier, currentValue: "ultrafast" }],
+      }),
+    ).toEqual({
+      option: { id: "serviceTier", value: "ultrafast" },
+      label: "Ultrafast",
+    });
+  });
+
+  it("returns null for models without speed modes", async () => {
+    const { resolveModelSpeedMode } = await import("./ComposerModelEffort");
+    expect(
+      resolveModelSpeedMode({
+        descriptors: [
+          selectDescriptor("effort", [
+            { id: "low", label: "Low" },
+            { id: "high", label: "High", isDefault: true },
+          ]),
+        ],
+      }),
+    ).toBeNull();
+  });
+});
+
 describe("readPromptUltrathink", () => {
   it("tells the Ultrathink prefix apart from the word in the body", () => {
     expect(readPromptUltrathink("Fix the bug")).toBe("none");
@@ -397,5 +474,71 @@ describe("getComposerReasoningStep", () => {
         selections(["reasoningEffort", to]),
       );
     }
+  });
+});
+
+describe("resolveComposerBottomRowMode", () => {
+  const base = {
+    hasPinnedModels: true,
+    hasPendingQuestion: false,
+    threadStarted: false,
+    isTurnRunning: false,
+    isEditingQueuedMessage: false,
+    canResume: false,
+    override: null,
+  } as const;
+
+  it("defaults to pins on a new thread when pins are available", () => {
+    expect(resolveComposerBottomRowMode(base)).toStrictEqual({
+      canUsePinMode: true,
+      mode: "pins",
+    });
+  });
+
+  it("defaults to custom controls after the first prompt, while running, resuming, or editing a queued prompt", () => {
+    expect(resolveComposerBottomRowMode({ ...base, threadStarted: true })).toStrictEqual({
+      canUsePinMode: true,
+      mode: "custom",
+    });
+    expect(resolveComposerBottomRowMode({ ...base, isTurnRunning: true })).toStrictEqual({
+      canUsePinMode: true,
+      mode: "custom",
+    });
+    expect(resolveComposerBottomRowMode({ ...base, isEditingQueuedMessage: true })).toStrictEqual({
+      canUsePinMode: true,
+      mode: "custom",
+    });
+    expect(resolveComposerBottomRowMode({ ...base, canResume: true })).toStrictEqual({
+      canUsePinMode: true,
+      mode: "custom",
+    });
+  });
+
+  it("honors a per-prompt toggle override when pin mode is available", () => {
+    expect(
+      resolveComposerBottomRowMode({ ...base, threadStarted: true, override: "pins" }),
+    ).toStrictEqual({
+      canUsePinMode: true,
+      mode: "pins",
+    });
+    expect(resolveComposerBottomRowMode({ ...base, override: "custom" })).toStrictEqual({
+      canUsePinMode: true,
+      mode: "custom",
+    });
+  });
+
+  it("disables pin mode without pins or while answering a pending question", () => {
+    expect(
+      resolveComposerBottomRowMode({ ...base, hasPinnedModels: false, override: "pins" }),
+    ).toStrictEqual({
+      canUsePinMode: false,
+      mode: "custom",
+    });
+    expect(
+      resolveComposerBottomRowMode({ ...base, hasPendingQuestion: true, override: "pins" }),
+    ).toStrictEqual({
+      canUsePinMode: false,
+      mode: "custom",
+    });
   });
 });

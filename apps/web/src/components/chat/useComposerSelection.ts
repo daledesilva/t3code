@@ -134,7 +134,10 @@ export function useComposerSelection(input: ComposerSelectionInput) {
   const onProviderModelSelect = (
     instanceId: ProviderInstanceId,
     model: string,
-    options?: { focusComposer?: boolean },
+    options?: {
+      focusComposer?: boolean;
+      modelOptions?: ReadonlyArray<import("@t3tools/contracts").ProviderOptionSelection>;
+    },
   ) => {
     if (!activeThread) return;
     cancelHeldComposerSend(composerTargetKey(composerDraftTarget));
@@ -211,9 +214,10 @@ export function useComposerSelection(input: ComposerSelectionInput) {
             )
           ? threadSelection.options
           : undefined;
+    const effectiveOptions = options?.modelOptions ?? pickOptions;
     const nextModelSelection: ModelSelection =
-      pickOptions !== undefined && pickOptions.length > 0
-        ? { instanceId, model: resolvedModel, options: [...pickOptions] }
+      effectiveOptions !== undefined && effectiveOptions.length > 0
+        ? { instanceId, model: resolvedModel, options: [...effectiveOptions] }
         : { instanceId, model: resolvedModel };
     const modelChangeBlockReason = getStartedThreadModelChangeBlockReason({
       hasStartedSession: activeRuntime !== null,
@@ -236,6 +240,15 @@ export function useComposerSelection(input: ComposerSelectionInput) {
       replaceOptions: true,
     });
     setStickyComposerModelSelection(nextModelSelection);
+    if (options?.modelOptions !== undefined && resolvedDriverKind !== null) {
+      useComposerDraftStore
+        .getState()
+        .setProviderModelOptions(composerDraftTarget, resolvedDriverKind, options.modelOptions, {
+          instanceId,
+          model: resolvedModel,
+          persistSticky: true,
+        });
+    }
     if (!isLocalDraftThread) applyThreadModelPick(composerDraftTarget);
     if (options?.focusComposer !== false) scheduleComposerFocus();
   };

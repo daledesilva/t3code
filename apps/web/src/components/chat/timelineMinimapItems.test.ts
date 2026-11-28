@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
 import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
 import {
   ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
@@ -37,6 +37,58 @@ describe("deriveTimelineMinimapItems", () => {
       expect(resolveTimelineMinimapPreview(items[0]!)?.userText).toBeNull();
     },
   );
+
+  it("attaches resolved before/after usage limit windows to matching user prompts", () => {
+    const at = "2026-10-01T00:00:00Z";
+    const items = deriveTimelineMinimapItems(
+      [
+        {
+          kind: "message",
+          id: "msg-1",
+          createdAt: at,
+          showAssistantMeta: false,
+          showAssistantCopyButton: false,
+          assistantCopyStreaming: false,
+          message: {
+            id: MessageId.make("msg-1"),
+            role: "user",
+            text: "Refactor the cache",
+            runId: null,
+            streaming: false,
+            createdAt: at,
+            updatedAt: at,
+          },
+        },
+      ],
+      [
+        {
+          id: RunId.make("run-1"),
+          userMessageId: MessageId.make("msg-1"),
+          providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-sonnet-4-5",
+          },
+          usageLimitsBefore: {
+            checkedAt: "2026-10-01T00:00:00Z",
+            windows: [{ id: "five_hour", kind: "session", label: "Session", usedPercent: 25 }],
+          },
+          usageLimitsAfter: {
+            checkedAt: "2026-10-01T00:02:00Z",
+            windows: [{ id: "five_hour", kind: "session", label: "Session", usedPercent: 37 }],
+          },
+        },
+      ],
+    );
+    expect(items[0]?.usage?.providerLabel).toBe("Claude");
+    expect(items[0]?.usage?.windows).toHaveLength(1);
+    expect(items[0]?.usage?.windows[0]).toMatchObject({
+      id: "five_hour",
+      remainingBefore: 75,
+      remainingAfter: 63,
+      usedDelta: 12,
+    });
+  });
 });
 
 describe("resolveTimelineMinimapPreview", () => {

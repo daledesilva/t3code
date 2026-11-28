@@ -1,5 +1,15 @@
-import { resolveTimelineMinimapPreview, type TimelineMinimapItem } from "./timelineMinimapItems";
+import {
+  resolveTimelineMinimapPreview,
+  type TimelineMinimapItem,
+  type TimelineMinimapUsage,
+} from "./timelineMinimapItems";
 import { useRef, useState, type MouseEvent } from "react";
+import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/provider-instance-display";
+import {
+  formatRunUsageUsedPercent,
+  paceRemainingPercent,
+  type RunUsageLimitWindowDelta,
+} from "@t3tools/shared/usageLimits";
 import { T, useGT } from "gt-react";
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -12,7 +22,9 @@ import {
   resolveTimelineMinimapTopPercent,
   TIMELINE_MINIMAP_MIN_ITEMS,
 } from "./MessagesTimeline.logic";
+import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { barColor } from "../usage/UsageLimits";
 import { cn } from "~/lib/utils";
 import { observeResize } from "~/lib/observeResize";
 
@@ -276,6 +288,9 @@ export function TimelineMinimap({
                       {activeItem.assistantText}
                     </span>
                   ) : null}
+                  {activeItem.usage && activeItem.usage.windows.length > 0 ? (
+                    <TimelineMinimapUsageBars usage={activeItem.usage} />
+                  ) : null}
                 </span>
               </span>
             ) : null}
@@ -291,6 +306,102 @@ export function TimelineMinimap({
         </div>
       </div>
     </div>
+  );
+}
+
+function TimelineMinimapUsageBars({ usage }: { readonly usage: TimelineMinimapUsage }) {
+  const color = normalizeProviderAccentColor(usage.accentColor) ?? barColor(usage.driver);
+  return (
+    <span
+      className="mt-2.5 flex flex-col gap-2 border-t border-border/60 pt-2.5"
+      data-testid="timeline-minimap-usage"
+    >
+      <span className="flex items-center gap-1.5 text-2xs font-medium text-muted-foreground">
+        <ProviderInstanceIcon
+          driverKind={usage.driver}
+          displayName={usage.providerLabel}
+          accentColor={usage.accentColor}
+          indicatorBackground="var(--popover)"
+          className="size-3.5"
+          iconClassName="size-3 text-foreground/80"
+        />
+        <span className="truncate">{usage.providerLabel}</span>
+      </span>
+      {usage.windows.map((window) => (
+        <TimelineMinimapUsageBarRow key={window.id} window={window} color={color} />
+      ))}
+    </span>
+  );
+}
+
+function TimelineMinimapUsageBarRow({
+  window,
+  color,
+}: {
+  readonly window: RunUsageLimitWindowDelta;
+  readonly color: string;
+}) {
+  const gt = useGT();
+  const timeLeft =
+    window.afterAtMs > 0 ? paceRemainingPercent(window.windowAfter, window.afterAtMs) : null;
+  const paceTickLeft = timeLeft !== null ? `clamp(3px, ${timeLeft}%, calc(100% - 3px))` : null;
+  const paceGapStyle =
+    paceTickLeft !== null
+      ? {
+          clipPath: `polygon(-1px -1px, calc(${paceTickLeft} - 3px) -1px, calc(${paceTickLeft} - 3px) calc(100% + 1px), calc(${paceTickLeft} + 3px) calc(100% + 1px), calc(${paceTickLeft} + 3px) -1px, calc(100% + 1px) -1px, calc(100% + 1px) calc(100% + 1px), -1px calc(100% + 1px))`,
+        }
+      : undefined;
+
+  return (
+    <span className="flex flex-col gap-1" data-testid={`timeline-minimap-usage-bar-${window.id}`}>
+      <span className="flex items-center justify-between gap-2 text-2xs leading-none">
+        <span className="truncate text-muted-foreground">{window.label}</span>
+        <span className="shrink-0 font-medium text-foreground tabular-nums">
+          {gt("{used}% used", { used: formatRunUsageUsedPercent(window.usedDelta) })}
+        </span>
+      </span>
+      <span className="relative block h-4 w-full rounded-md bg-muted">
+        <span className="absolute inset-0 block overflow-hidden rounded-md">
+          <span className="absolute inset-0 block" style={paceGapStyle}>
+            {window.remainingAfter > 0 ? (
+              <span
+                aria-hidden="true"
+                data-testid="timeline-minimap-usage-remaining"
+                className={cn(
+                  "absolute inset-y-0 left-0 block opacity-35",
+                  window.usedDelta > 0 ? "rounded-l-md" : "rounded-md",
+                )}
+                style={{ width: `${window.remainingAfter}%`, backgroundColor: color }}
+              />
+            ) : null}
+            {window.usedDelta > 0 ? (
+              <span
+                aria-hidden="true"
+                data-testid="timeline-minimap-usage-delta"
+                className={cn(
+                  "absolute inset-y-0 block box-border",
+                  window.remainingAfter === 0 ? "rounded-md" : "rounded-r-md",
+                )}
+                style={{
+                  left: `${window.remainingAfter}%`,
+                  width: `${window.usedDelta}%`,
+                  minWidth: "4px",
+                  border: `1px solid color-mix(in oklch, ${color} 80%, transparent)`,
+                  backgroundImage: `repeating-linear-gradient(135deg, color-mix(in oklch, ${color} 45%, transparent) 0 1.5px, transparent 1.5px 5px)`,
+                }}
+              />
+            ) : null}
+          </span>
+        </span>
+        {paceTickLeft !== null ? (
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0.5 block w-0.5 -translate-x-1/2 rounded-full bg-foreground"
+            style={{ left: paceTickLeft }}
+          />
+        ) : null}
+      </span>
+    </span>
   );
 }
 

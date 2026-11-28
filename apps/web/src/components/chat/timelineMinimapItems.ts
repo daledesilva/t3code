@@ -1,4 +1,10 @@
 import {
+  PROVIDER_DISPLAY_NAMES,
+  ProviderDriverKind,
+  type OrchestrationV2Run,
+  type ServerProvider,
+} from "@t3tools/contracts";
+import {
   assistantCitationsToPlainText,
   splitsSurrogatePair,
 } from "@t3tools/shared/assistantCitations";
@@ -7,22 +13,53 @@ import {
   isAttachmentOnlyBootstrapPrompt,
   replaceComposerContextReferences,
 } from "@t3tools/shared/composerContextReferences";
+import {
+  resolveRunUsageLimitWindows,
+  type RunUsageLimitWindowDelta,
+} from "@t3tools/shared/usageLimits";
 import type { Nodes } from "hast";
 
 import { markdownTree } from "~/markdown/wordsHast";
 
 import type { MessagesTimelineRow } from "./MessagesTimeline.logic";
 
+export type TimelineMinimapRun = Pick<
+  OrchestrationV2Run,
+  "id" | "providerInstanceId" | "modelSelection"
+> &
+  Partial<Pick<OrchestrationV2Run, "userMessageId" | "usageLimitsBefore" | "usageLimitsAfter">>;
+
+export interface TimelineMinimapUsage {
+  readonly driver: ServerProvider["driver"];
+  readonly providerLabel: string;
+  readonly accentColor?: string | undefined;
+  readonly windows: ReadonlyArray<RunUsageLimitWindowDelta>;
+}
+
 export interface TimelineMinimapItem {
   readonly id: string;
   readonly rowIndex: number;
   readonly userText: string | null;
   readonly assistantText: string | null;
+  readonly usage?: TimelineMinimapUsage | null;
 }
 
 export function deriveTimelineMinimapItems(
   rows: ReadonlyArray<MessagesTimelineRow>,
+  runs?: ReadonlyArray<TimelineMinimapRun>,
+  providers?: ReadonlyArray<ServerProvider>,
 ): TimelineMinimapItem[] {
+  const runByUserMessageId = new Map<string, TimelineMinimapRun>();
+  for (const run of runs ?? []) {
+    if (run.userMessageId) {
+      runByUserMessageId.set(run.userMessageId, run);
+    }
+  }
+  const providerByInstanceId = new Map<string, ServerProvider>();
+  for (const provider of providers ?? []) {
+    providerByInstanceId.set(provider.instanceId, provider);
+  }
+
   const items: TimelineMinimapItem[] = [];
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
@@ -30,11 +67,35 @@ export function deriveTimelineMinimapItems(
       continue;
     }
 
+    const run = runByUserMessageId.get(row.message.id);
+    let usage: TimelineMinimapUsage | undefined;
+    if (run?.usageLimitsAfter) {
+      const provider = providerByInstanceId.get(run.providerInstanceId);
+      const driver = provider?.driver ?? ProviderDriverKind.make(String(run.providerInstanceId));
+      const windows = resolveRunUsageLimitWindows({
+        driver,
+        model: run.modelSelection.model,
+        before: run.usageLimitsBefore,
+        after: run.usageLimitsAfter,
+      });
+      if (windows.length > 0) {
+        const providerLabel =
+          provider?.displayName?.trim() || PROVIDER_DISPLAY_NAMES[driver] || String(driver);
+        usage = {
+          driver,
+          providerLabel,
+          accentColor: provider?.accentColor,
+          windows,
+        };
+      }
+    }
+
     items.push({
       id: row.id,
       rowIndex: index,
       userText: isAttachmentOnlyBootstrapPrompt(row.message.text) ? "" : row.message.text,
       assistantText: resolveFinalAssistantTextForTurn(rows, index),
+      ...(usage ? { usage } : {}),
     });
   }
   return items;

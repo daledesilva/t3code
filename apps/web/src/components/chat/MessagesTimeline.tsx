@@ -12,7 +12,8 @@ import { useChatCanvas } from "./ChatCanvasContext";
 import { WorkLogBlock } from "./WorkLog";
 import { TimelinePendingApprovalRow } from "./TimelinePendingApprovalRow";
 import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
-import { deriveTimelineMinimapItems } from "./timelineMinimapItems";
+import { deriveTimelineMinimapItems, type TimelineMinimapRun } from "./timelineMinimapItems";
+import { useEnvironmentProviders } from "../../state/environments";
 import {
   type AssistantCitation,
   type EnvironmentId,
@@ -325,7 +326,7 @@ interface MessagesTimelineProps {
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<ServerProviderSkill>;
-  runs: ReadonlyArray<HandoffTimelineRun>;
+  runs: ReadonlyArray<HandoffTimelineRun & Partial<TimelineMinimapRun>>;
   anchorMessageId: MessageId | null;
   onAnchorReady: (messageId: MessageId, anchorIndex: number) => void;
   onAnchorSizeChanged: (messageId: MessageId, size: number) => void;
@@ -797,7 +798,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
   );
   // Run status/timestamps change per stream event; keep them out of shared row context.
   const runs = useStableHandoffRuns(runsProp);
-  const minimapItems = deriveTimelineMinimapItems(rows);
+  const providersByEnvironment = useEnvironmentProviders();
+  const environmentProviders = activeThreadEnvironmentId
+    ? providersByEnvironment.get(activeThreadEnvironmentId)
+    : undefined;
+  const minimapItems = deriveTimelineMinimapItems(rows, runsProp, environmentProviders);
   const minimapRowIndices = minimapItems.map((item) => item.rowIndex);
   const restoreRowIndex =
     restoringThreadPosition && rememberedPosition?.atEnd === false

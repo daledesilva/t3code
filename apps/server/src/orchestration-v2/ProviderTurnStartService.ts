@@ -85,6 +85,7 @@ import {
   makeProviderFailure,
 } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
+import * as RunUsageLimitsTracker from "./RunUsageLimitsTracker.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import {
@@ -424,6 +425,7 @@ export const layer: Layer.Layer<
     const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
+    const usageLimitsTracker = yield* RunUsageLimitsTracker.RunUsageLimitsTracker;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
     const restoreMissingWorktree = yield* makeRestoreMissingWorktree;
     const worktreeRestore = yield* ThreadWorktreeRestore;
@@ -2290,10 +2292,13 @@ export const layer: Layer.Layer<
         createdAt: providerThread.createdAt,
         updatedAt: now,
       };
+      const usageLimitsBefore =
+        run.usageLimitsBefore ?? (yield* usageLimitsTracker.readCurrent(run.providerInstanceId));
       const runningRun: OrchestrationV2Run = {
         ...run,
         status: "running",
         startedAt: run.startedAt ?? now,
+        ...(usageLimitsBefore === undefined ? {} : { usageLimitsBefore }),
       };
       const runningAttempt: OrchestrationV2RunAttempt = {
         ...attempt,

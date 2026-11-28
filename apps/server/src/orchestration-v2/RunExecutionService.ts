@@ -59,6 +59,7 @@ import {
 } from "@t3tools/provider-core/server/failure";
 import { makeInterruptResultTurnItem } from "./runInterruptResult.ts";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
+import * as RunUsageLimitsTracker from "./RunUsageLimitsTracker.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import { userFacingDatabaseErrorMessage } from "./UserFacingErrors.ts";
@@ -738,6 +739,7 @@ export const layer: Layer.Layer<
     const previewAgentActivity = yield* PreviewAgentActivity.PreviewAgentActivity;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
     const finalizationObserver = yield* RunFinalizationService.RunFinalizationObserver;
+    const usageLimitsTracker = yield* RunUsageLimitsTracker.RunUsageLimitsTracker;
     const turnAnalytics = yield* ProviderUsageAnalytics.ProviderTurnAnalytics;
     const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
 
@@ -860,6 +862,9 @@ export const layer: Layer.Layer<
             : [];
         // The run settles now; turn-end checkpoint capture follows on this thread's effect lane.
         const persistedStatus = input.terminal.status;
+        const usageLimitsAfter = yield* usageLimitsTracker.readCurrent(
+          input.run.providerInstanceId,
+        );
         // Omit delegatedCompletion; the startup snapshot must not overwrite newer acknowledgements, successors, or Stop barriers.
         const { delegatedCompletion: _delegatedCompletion, ...runWithoutDelegatedCompletion } =
           input.run;
@@ -867,6 +872,7 @@ export const layer: Layer.Layer<
           ...runWithoutDelegatedCompletion,
           status: persistedStatus,
           completedAt,
+          ...(usageLimitsAfter === undefined ? {} : { usageLimitsAfter }),
         };
         const finalizedRootNode: OrchestrationV2ExecutionNode = {
           ...input.rootNode,
@@ -1095,6 +1101,36 @@ export const layer: Layer.Layer<
           childrenRunning: hasOpenSubagentProjection && cascadedSubagentEvents.length === 0,
         });
         yield* input.refreshAfterTurn;
+        yield* Effect.gen(function* () {
+          const refreshed = yield* usageLimitsTracker.refreshAndRead(input.run.providerInstanceId);
+          if (
+            refreshed === undefined ||
+            RunUsageLimitsTracker.usageLimitsSnapshotsEqual(refreshed, usageLimitsAfter)
+          ) {
+            return;
+          }
+          const occurredAt = yield* DateTime.now;
+          yield* eventSink.write({
+            events: [
+              {
+                id: yield* idAllocator.allocate.event({ threadId: input.run.threadId }),
+                type: "run.usage-limits-updated",
+                threadId: input.run.threadId,
+                runId: input.run.id,
+                nodeId: input.rootNode.id,
+                providerInstanceId: input.run.providerInstanceId,
+                occurredAt,
+                payload: {
+                  runId: input.run.id,
+                  usageLimitsAfter: refreshed,
+                },
+              },
+            ],
+          });
+        }).pipe(
+          Effect.ignoreCause({ log: true }),
+          Effect.forkIn(scope, { startImmediately: true }),
+        );
         return true;
       },
     );

@@ -85,6 +85,7 @@ import * as DocumentText from "./provider/DocumentText.ts";
 import * as AcpRegistrySupport from "@t3tools/provider-acp-registry/server/AcpRegistrySupport";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as NativeChildWorkQuery from "./orchestration-v2/NativeChildWorkQuery.ts";
+import * as RunUsageLimitsTracker from "./orchestration-v2/RunUsageLimitsTracker.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
 import * as SourceControlBuiltInDrivers from "./sourceControl/builtInDrivers.ts";
 import * as SourceControlSignIn from "./sourceControl/SourceControlSignIn.ts";
@@ -658,6 +659,7 @@ const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
     ),
   ),
   Layer.provide(UsageLimitSources.layerResetFallback),
+  Layer.provide(RunUsageLimitsTracker.layerFromProviderInstanceRegistry),
   Layer.provide(layerTaskFolders),
   Layer.provide(layerScheduledTaskWebhookOrigin),
   Layer.provide(ProviderUsageAnalytics.layer),

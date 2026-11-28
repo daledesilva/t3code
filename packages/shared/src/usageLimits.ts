@@ -1090,3 +1090,152 @@ export function collectProviderUsageLimits(
   }
   return { createdAt: DateTime.formatIso(DateTime.makeUnsafe(now)), accounts, notices };
 }
+
+export interface RunUsageLimitWindowDelta {
+  readonly id: string;
+  readonly kind: ServerProviderUsageWindow["kind"];
+  readonly label: string;
+  readonly remainingBefore: number;
+  readonly remainingAfter: number;
+  readonly usedDelta: number;
+  readonly windowAfter: ServerProviderUsageWindow;
+  readonly afterAtMs: number;
+}
+
+const claudeScopeToken = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+
+function usageWindowAppliesToModel(
+  driver: ServerProvider["driver"],
+  model: string,
+  window: ServerProviderUsageWindow,
+  allWindows: ReadonlyArray<ServerProviderUsageWindow>,
+): boolean {
+  if (window.modelIds !== undefined && !window.modelIds.includes(model)) return false;
+  if (window.providerIds !== undefined && !window.providerIds.includes(model.split("/")[0] ?? "")) {
+    return false;
+  }
+  switch (driver) {
+    case "cursor": {
+      const hasAuto = allWindows.some((entry) => entry.id === "autoPercentUsed");
+      const hasApi = allWindows.some((entry) => entry.id === "apiPercentUsed");
+      if (hasAuto && hasApi) {
+        const isCursorModel = /^(auto|default|grok|composer)/i.test(model);
+        return isCursorModel ? window.id === "autoPercentUsed" : window.id === "apiPercentUsed";
+      }
+      return true;
+    }
+    case "antigravity": {
+      const hasArgon = allWindows.some((entry) => entry.id.startsWith("gemini-argon-"));
+      const hasCarbon = allWindows.some((entry) => entry.id.startsWith("gemini-carbon-"));
+      if (/^gemini-.*argon/i.test(model) && hasArgon) {
+        return window.id.startsWith("gemini-argon-");
+      }
+      if (/^gemini-.*carbon/i.test(model) && hasCarbon) {
+        return window.id.startsWith("gemini-carbon-");
+      }
+      if (/^gemini-/i.test(model)) {
+        return (
+          window.id.startsWith("gemini-") &&
+          !window.id.startsWith("gemini-argon-") &&
+          !window.id.startsWith("gemini-carbon-")
+        );
+      }
+      if (/^claude-/i.test(model)) {
+        return window.id.startsWith("claude-") || window.id.startsWith("3p-");
+      }
+      if (/^gpt-/i.test(model)) {
+        return window.id.startsWith("gpt-") || window.id.startsWith("3p-");
+      }
+      return true;
+    }
+    case "claudeAgent": {
+      if (!window.id.startsWith("seven_day_")) return true;
+      const scope = window.id.slice("seven_day_".length);
+      if (scope === "overage_included") return true;
+      return claudeScopeToken(model).includes(scope);
+    }
+    case "codex": {
+      const hasPlanWindows = allWindows.some(
+        (entry) => entry.id === "primary" || entry.id === "secondary",
+      );
+      return window.id !== "individual" || !hasPlanWindows;
+    }
+    case "opencode":
+      return !window.id.startsWith("go_") || model.startsWith("opencode-go/");
+    default:
+      return true;
+  }
+}
+
+function runUsageWindowLabel(
+  driver: ServerProvider["driver"],
+  window: ServerProviderUsageWindow,
+): string {
+  if (driver === "cursor") {
+    const details = CURSOR_USAGE_WINDOWS.find((entry) => entry.id === window.id);
+    if (details) return details.label;
+  }
+  return window.label;
+}
+
+export function formatRunUsageUsedPercent(usedDelta: number): string {
+  if (!Number.isFinite(usedDelta) || usedDelta <= 0) return "0";
+  const cleaned = Number(usedDelta.toPrecision(12));
+  if (cleaned >= 1) return String(Math.round(cleaned));
+  const decimals = Math.max(1, -Math.floor(Math.log10(cleaned)));
+  if (decimals > 6) return "0";
+  return cleaned.toFixed(decimals).replace(/\.?0+$/, "");
+}
+
+export function resolveRunUsageLimitWindows(input: {
+  readonly driver: ServerProvider["driver"];
+  readonly model: string;
+  readonly before:
+    | { readonly checkedAt: string; readonly windows: ReadonlyArray<ServerProviderUsageWindow> }
+    | undefined;
+  readonly after:
+    | { readonly checkedAt: string; readonly windows: ReadonlyArray<ServerProviderUsageWindow> }
+    | undefined;
+}): ReadonlyArray<RunUsageLimitWindowDelta> {
+  if (!input.after || input.after.windows.length === 0) return [];
+  const beforeById = new Map(
+    (input.before?.windows ?? []).map((window) => [window.id, window] as const),
+  );
+  const parsedAfterAt = Date.parse(input.after.checkedAt);
+  const afterAtMs = Number.isFinite(parsedAfterAt) ? parsedAfterAt : 0;
+  const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
+
+  return input.after.windows
+    .filter((window) =>
+      usageWindowAppliesToModel(input.driver, input.model, window, input.after!.windows),
+    )
+    .sort((left, right) => WINDOW_KIND_ORDER[left.kind] - WINDOW_KIND_ORDER[right.kind])
+    .map((windowAfter) => {
+      const windowBefore = beforeById.get(windowAfter.id);
+      const remainingAfter = remainingPercent(windowAfter);
+      const rawRemainingBefore = windowBefore ? remainingPercent(windowBefore) : remainingAfter;
+      const usedAfter = clampPercent(windowAfter.usedPercent);
+      const usedBefore = windowBefore ? clampPercent(windowBefore.usedPercent) : usedAfter;
+      const beforeReset = windowBefore?.resetsAt ? Date.parse(windowBefore.resetsAt) : Number.NaN;
+      const afterReset = windowAfter.resetsAt ? Date.parse(windowAfter.resetsAt) : Number.NaN;
+      const windowResetOccurred =
+        (Number.isFinite(beforeReset) &&
+          Number.isFinite(afterReset) &&
+          afterReset > beforeReset + MINUTE) ||
+        usedAfter < usedBefore;
+      const remainingBefore = windowResetOccurred ? remainingAfter : rawRemainingBefore;
+      const usedDelta = windowResetOccurred
+        ? 0
+        : Number(Math.max(0, usedAfter - usedBefore).toPrecision(12));
+      return {
+        id: windowAfter.id,
+        kind: windowAfter.kind,
+        label: runUsageWindowLabel(input.driver, windowAfter),
+        remainingBefore,
+        remainingAfter,
+        usedDelta,
+        windowAfter,
+        afterAtMs,
+      };
+    });
+}

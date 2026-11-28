@@ -26,6 +26,7 @@ import {
   IsoDateTime,
   MessageId,
   EnvironmentId,
+  ForwardCompatibleArray,
   NodeId,
   ForwardCompatibleUnion,
   ForwardCompatibleUnionArray,
@@ -63,6 +64,7 @@ import {
   OrchestrationGetTurnDiffResult,
 } from "./checkpointDiff.ts";
 import { ModelSelection } from "./modelSelection.ts";
+import { ServerProviderUsageWindow } from "./providerUsageLimits.ts";
 import { ThreadIssueKey, ThreadIssueLink, ThreadIssueLinkSource } from "./issue.ts";
 import {
   ThreadLinkedPullRequest,
@@ -782,6 +784,19 @@ export const OrchestrationV2RunBackgroundWorkCancelled = Schema.Struct({
 export type OrchestrationV2RunBackgroundWorkCancelled =
   typeof OrchestrationV2RunBackgroundWorkCancelled.Type;
 
+export const OrchestrationV2RunUsageLimitsSnapshot = Schema.Struct({
+  checkedAt: IsoDateTime,
+  windows: ForwardCompatibleArray(ServerProviderUsageWindow),
+});
+export type OrchestrationV2RunUsageLimitsSnapshot =
+  typeof OrchestrationV2RunUsageLimitsSnapshot.Type;
+
+export const OrchestrationV2RunUsageLimitsUpdated = Schema.Struct({
+  runId: RunId,
+  usageLimitsAfter: OrchestrationV2RunUsageLimitsSnapshot,
+});
+export type OrchestrationV2RunUsageLimitsUpdated = typeof OrchestrationV2RunUsageLimitsUpdated.Type;
+
 export const OrchestrationV2ThreadLaunchWorkspaceStrategy = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("root"),
@@ -858,6 +873,8 @@ export const OrchestrationV2Run = Schema.Struct({
   workspacePreparation: Schema.optional(OrchestrationV2ThreadLaunchWorkspaceStrategy),
   /** Starts a new provider conversation; earlier runs stay visible but never reach the provider. */
   freshContext: Schema.optional(Schema.Boolean),
+  usageLimitsBefore: Schema.optional(OrchestrationV2RunUsageLimitsSnapshot),
+  usageLimitsAfter: Schema.optional(OrchestrationV2RunUsageLimitsSnapshot),
   /** The JSON Schema of the result this run was asked to return as data. */
   outputSchema: Schema.optional(Schema.Record(Schema.String, Schema.Json)),
   /**
@@ -2256,6 +2273,11 @@ export const OrchestrationV2DomainEvent = Schema.Union([
   }),
   Schema.Struct({
     ...OrchestrationV2EventBase.fields,
+    type: Schema.Literal("run.usage-limits-updated"),
+    payload: OrchestrationV2RunUsageLimitsUpdated,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2EventBase.fields,
     type: Schema.Literal("run.output-submitted"),
     payload: OrchestrationV2RunOutputSubmitted,
   }),
@@ -3214,6 +3236,11 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
     ...OrchestrationV2JsonEventBaseFields,
     type: Schema.Literal("run.background-work-cancelled"),
     payload: OrchestrationV2RunBackgroundWorkCancelled,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2JsonEventBaseFields,
+    type: Schema.Literal("run.usage-limits-updated"),
+    payload: OrchestrationV2RunUsageLimitsUpdated,
   }),
   Schema.Struct({
     ...OrchestrationV2JsonEventBaseFields,

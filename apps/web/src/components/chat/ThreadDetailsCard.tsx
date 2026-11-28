@@ -26,6 +26,7 @@ export function ThreadDetailsCard({
   handle,
   contentKey,
   onContextMenu,
+  secondaryCard,
   children,
 }: {
   threadRef: ScopedThreadRef;
@@ -34,6 +35,7 @@ export function ThreadDetailsCard({
   /** Changes when the set of rendered items changes, so cached heights are measured again. */
   contentKey: string;
   onContextMenu?: MouseEventHandler<HTMLDivElement>;
+  secondaryCard?: ReactNode;
   children: (density: "full" | "compact" | "essential") => ReactNode;
 }) {
   const gt = useGT();
@@ -96,10 +98,11 @@ export function ThreadDetailsCard({
       // Only the laid-out DOM knows the full card height, and the canvas keeps preview
       // frames clear of it, so it is reported from this measure effect.
       if (density === "full" && cardWidth !== undefined) {
+        const stack = frame?.closest<HTMLElement>("[data-thread-details-panel]");
         measureDetailsCard?.({
           threadRef: { environmentId, threadId },
           width: cardWidth,
-          fullContentHeight: next,
+          fullContentHeight: Math.max(next, stack?.offsetHeight ?? 0),
         });
       }
     };
@@ -114,18 +117,25 @@ export function ThreadDetailsCard({
     environmentId,
     threadId,
   ]);
+  const topCardMaxHeight = placement
+    ? secondaryCard
+      ? Math.max(180, height - 180)
+      : height
+    : undefined;
   const card = (
     <div
       className={cn(
-        "dropdown-glass isolate contain-paint grid max-h-full grid-rows-[minmax(0,1fr)] overflow-hidden rounded-2xl",
+        "dropdown-glass isolate contain-paint grid min-h-0 shrink-0 max-h-full grid-rows-[minmax(0,1fr)] overflow-hidden rounded-2xl",
         mode === "popover" &&
-          "max-h-[min(calc(100dvh-6.5rem),calc(var(--available-height,100dvh)-1rem))]",
+          (secondaryCard
+            ? "max-h-[max(11rem,min(calc(100dvh-18rem),calc(var(--available-height,100dvh)-12rem)))]"
+            : "max-h-[min(calc(100dvh-6.5rem),calc(var(--available-height,100dvh)-1rem))]"),
       )}
-      style={placement ? { maxHeight: height } : undefined}
+      style={topCardMaxHeight !== undefined ? { maxHeight: topCardMaxHeight } : undefined}
       onContextMenu={onContextMenu}
       data-thread-details-card
     >
-      <ScrollArea scrollFade className="min-h-0">
+      <ScrollArea scrollFade observeContent className="min-h-0">
         <div ref={setContentElement}>{children(density)}</div>
       </ScrollArea>
     </div>
@@ -154,7 +164,7 @@ export function ThreadDetailsCard({
           data-workspace-focus-key={`details:${threadRef.environmentId}:${threadRef.threadId}`}
           // Skip the return transition to avoid overlapping the rising preview.
           className={cn(
-            "absolute z-20",
+            "absolute z-20 flex flex-col gap-2.5",
             topInset > 0 && "transition-[top] duration-150 ease-out motion-reduce:transition-none",
           )}
           style={{
@@ -167,6 +177,11 @@ export function ThreadDetailsCard({
           data-thread-details-panel="inline"
         >
           {card}
+          {secondaryCard ? (
+            <div className="grid min-h-0 flex-initial grid-rows-[minmax(0,1fr)]">
+              {secondaryCard}
+            </div>
+          ) : null}
         </aside>
       ) : null}
       {/* Rendered in both modes: base-ui keeps a popup that unmounts mid-open
@@ -191,8 +206,20 @@ export function ThreadDetailsCard({
         padding="none"
       >
         {mode === "popover" ? (
-          <div data-density={density} data-thread-details-panel="popover">
+          <div
+            data-density={density}
+            data-thread-details-panel="popover"
+            className={cn(
+              secondaryCard &&
+                "flex max-h-[min(calc(100dvh-6.5rem),calc(var(--available-height,100dvh)-1rem))] flex-col gap-2.5",
+            )}
+          >
             {card}
+            {secondaryCard ? (
+              <div className="grid min-h-0 flex-initial grid-rows-[minmax(0,1fr)]">
+                {secondaryCard}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </PopoverPopup>

@@ -192,6 +192,42 @@ export const ProviderRuntimeModeLimitsResult = Schema.Struct({
 });
 export type ProviderRuntimeModeLimitsResult = typeof ProviderRuntimeModeLimitsResult.Type;
 
+export const ProviderMcpServerScope = Schema.Literals(["provider", "repo"]);
+export type ProviderMcpServerScope = typeof ProviderMcpServerScope.Type;
+
+export const ProviderMcpServerStatus = Schema.Literals([
+  "configured",
+  "connected",
+  "needs-auth",
+  "failed",
+  "disabled",
+]);
+export type ProviderMcpServerStatus = typeof ProviderMcpServerStatus.Type;
+
+export const ProviderMcpServerTransport = Schema.Literals(["stdio", "http", "sse"]);
+export type ProviderMcpServerTransport = typeof ProviderMcpServerTransport.Type;
+
+export const ProviderMcpServer = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  scope: ProviderMcpServerScope,
+  status: ProviderMcpServerStatus,
+  source: Schema.optional(TrimmedNonEmptyString),
+  transport: Schema.optional(ProviderMcpServerTransport),
+  enabled: Schema.Boolean,
+});
+export type ProviderMcpServer = typeof ProviderMcpServer.Type;
+
+export const ProviderMcpServersInput = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  cwd: Schema.optional(TrimmedNonEmptyString),
+});
+export type ProviderMcpServersInput = typeof ProviderMcpServersInput.Type;
+
+export const ProviderMcpServersResult = Schema.Struct({
+  servers: ForwardCompatibleArray(ProviderMcpServer),
+});
+export type ProviderMcpServersResult = typeof ProviderMcpServersResult.Type;
+
 /** Unavailable snapshots must set installed and enabled false. */
 export const ServerProviderAvailability = Schema.Literals(["available", "unavailable"]);
 export type ServerProviderAvailability = typeof ServerProviderAvailability.Type;

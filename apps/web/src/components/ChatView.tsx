@@ -266,6 +266,8 @@ import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
   composerTargetKey,
+  deriveEffectiveComposerModelState,
+  useComposerDraftModelState,
   useComposerDraftStore,
   DraftId,
 } from "../composerDraftStore";
@@ -653,6 +655,7 @@ export default function ChatView(props: ChatViewProps) {
   const composerRuntimeMode = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.runtimeMode ?? null,
   );
+  const composerDraftModelState = useComposerDraftModelState(composerDraftTarget);
   const composerActiveProvider = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
   );
@@ -1463,6 +1466,36 @@ export default function ChatView(props: ChatViewProps) {
       composerModelSelectionApplies ? composerSelectedModelSelection : null,
       activeThread?.modelSelection,
     ].find((selection) => selection?.instanceId === activeProviderInstanceId)?.model ?? null;
+  const modelCardSelection = resolveComposerProviderSelection({
+    entries: providerInstanceEntries,
+    candidateInstanceIds: [
+      selectedProviderByThreadId,
+      activeRuntime?.providerInstanceId,
+      activeThreadModelInstanceId,
+      activeProjectDefaultModelSelection?.instanceId,
+    ],
+    lockedProvider: modelPickerLockedProvider,
+    lockedInstanceId: activeRuntime?.providerInstanceId ?? activeThreadModelInstanceId,
+  });
+  const modelCardProviderEntry =
+    modelCardSelection.selectedProviderEntry ??
+    (modelCardSelection.unavailableProviderInstanceId
+      ? (providerInstanceEntries.find(
+          (entry) => entry.instanceId === modelCardSelection.unavailableProviderInstanceId,
+        ) ?? null)
+      : null);
+  const modelCardEffectiveModelState = deriveEffectiveComposerModelState({
+    draft: composerDraftModelState,
+    threadStarted: threadHasStarted(activeThread),
+    providers: providerStatuses,
+    selectedProvider: modelCardProviderEntry?.driverKind ?? modelCardSelection.requestedDriverKind,
+    selectedInstanceId:
+      modelCardProviderEntry?.instanceId ?? NO_PROVIDER_MODEL_SELECTION.instanceId,
+    requestedInstanceId: modelCardSelection.requestedInstanceId,
+    threadModelSelection: activeThread?.modelSelection,
+    projectModelSelection: activeProjectDefaultModelSelection,
+    settings,
+  });
   const conversationProviderStatus =
     providerStatuses.find((status) => status.instanceId === activeRuntime?.providerInstanceId) ??
     activeProviderStatus;
@@ -4222,6 +4255,17 @@ export default function ChatView(props: ChatViewProps) {
                     providers: providerStatuses,
                     sources: serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES,
                     contextWindow: activeContextWindow,
+                  }}
+                  modelCard={{
+                    providerEntry: modelCardProviderEntry,
+                    selectedModel: modelCardEffectiveModelState.selectedModel || null,
+                    providers: providerStatuses,
+                    sources: serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES,
+                    threadRuns: serverProjection?.runs ?? EMPTY_RUNS,
+                    isEditingQueuedRun: queuedRunEdit.isEditing,
+                    threadModelSelection: activeThread?.modelSelection ?? null,
+                    threadRuntimeProviderInstanceId: activeRuntime?.providerInstanceId ?? null,
+                    onOpenProviderSetup: openProviderSetupStable,
                   }}
                 />
 

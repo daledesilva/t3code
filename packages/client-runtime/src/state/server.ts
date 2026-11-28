@@ -1626,6 +1626,11 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetProviderRuntimeModeLimits,
       staleTimeMs: 5_000,
     }),
+    providerMcpServers: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:provider-mcp-servers",
+      tag: WS_METHODS.serverGetProviderMcpServers,
+      staleTimeMs: 10_000,
+    }),
     traceDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:trace-diagnostics",
       tag: WS_METHODS.serverGetTraceDiagnostics,

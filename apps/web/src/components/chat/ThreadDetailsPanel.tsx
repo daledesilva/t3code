@@ -30,12 +30,19 @@ import {
   ThreadDetailsUsage,
   type ThreadDetailsUsageInput,
 } from "./ThreadDetailsUsage";
+import { ThreadDetailsMcpSection, ThreadDetailsModeLimitsSection } from "./ThreadDetailsMcpRows";
+import { ThreadDetailsModelCard, type ThreadDetailsModelCardProps } from "./ThreadDetailsModelCard";
 import { ThreadDetailsItemsMenuItems } from "./ThreadDetailsItemsMenu";
 import { resolveThreadDetailsVisibility, THREAD_DETAILS_ITEMS } from "./threadDetailsItems";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useProject, useServerConfigs } from "../../state/entities";
 import { filesystemEnvironment } from "../../state/filesystem";
+import { providerMcpServersTarget, useProviderMcpServers } from "../../state/providerMcpServers";
 import { useEnvironmentQuery } from "../../state/query";
+import {
+  runtimeModeLimitsTarget,
+  useProviderRuntimeModeLimits,
+} from "../../state/runtimeModeLimits";
 import { ThreadDetailsThreadPrRows } from "./ThreadDetailsPrRows";
 import { cn } from "../../lib/utils";
 import { SlidersHorizontalIcon } from "lucide-react";
@@ -89,12 +96,30 @@ interface ThreadDetailsPanelProps extends Pick<
   onUpdateProjectScript: ComponentProps<typeof ProjectScriptsControl>["onUpdateScript"];
   onDeleteProjectScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
   usage: ThreadDetailsUsageInput;
+  modelCard?: Omit<
+    ThreadDetailsModelCardProps,
+    "mcpServers" | "runtimeModeLimits" | "cwd" | "isServerThread"
+  >;
 }
 
 export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
   const visible = useClientSettings(resolveThreadDetailsVisibility);
   const gt = useGT();
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const activeModelProviderInstanceId =
+    props.modelCard?.providerEntry?.instanceId ?? props.usage.providerInstanceId ?? null;
+  const mcpServers = useProviderMcpServers(
+    providerMcpServersTarget(props.environmentId, activeModelProviderInstanceId, props.gitCwd),
+  );
+  const runtimeModeLimits = useProviderRuntimeModeLimits(
+    runtimeModeLimitsTarget(
+      props.environmentId,
+      activeModelProviderInstanceId ?? undefined,
+      props.gitCwd,
+    ),
+  );
+  const repoMcpServers = mcpServers.filter((server) => server.scope === "repo");
+  const repoModeLimits = runtimeModeLimits.filter((limit) => limit.reason === "project-settings");
   const t3File = useT3ProjectFileState(
     props.environmentId,
     props.activeProjectScripts && visible.scripts ? props.gitCwd : null,
@@ -149,11 +174,23 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       : {}),
   };
 
+  const secondaryCard =
+    props.modelCard && props.modelCard.providerEntry ? (
+      <ThreadDetailsModelCard
+        {...props.modelCard}
+        isServerThread={props.isServerThread}
+        mcpServers={mcpServers}
+        runtimeModeLimits={runtimeModeLimits}
+        cwd={props.gitCwd}
+      />
+    ) : null;
+
   return (
     <ThreadDetailsCard
       threadRef={{ environmentId: props.environmentId, threadId: props.threadId }}
       anchor={props.anchor}
       handle={props.handle}
+      secondaryCard={secondaryCard}
       contentKey={THREAD_DETAILS_ITEMS.filter((item) => visible[item.id])
         .map((item) => item.id)
         .join(",")}
@@ -321,7 +358,24 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 />
               ) : null}
 
-              {visible.usage ? <ThreadDetailsUsage {...props.usage} /> : null}
+              {repoMcpServers.length > 0 ? (
+                <ThreadDetailsMcpSection
+                  headingId="thread-details-repo-mcp-heading"
+                  title={gt("Repo MCPs")}
+                  servers={repoMcpServers}
+                  showSource
+                />
+              ) : null}
+
+              {repoModeLimits.length > 0 ? (
+                <ThreadDetailsModeLimitsSection
+                  headingId="thread-details-repo-mode-limits-heading"
+                  title={gt("Repo restrictions")}
+                  limits={repoModeLimits}
+                />
+              ) : null}
+
+              {!secondaryCard && visible.usage ? <ThreadDetailsUsage {...props.usage} /> : null}
 
               {visible.context && props.usage.contextWindow ? (
                 <ThreadDetailsContext usage={props.usage.contextWindow} />

@@ -235,9 +235,11 @@ import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { buildPullRequestReferenceContext } from "../pullRequest/pullRequestDetail.logic";
 import {
+  type ComposerBottomRowMode,
   getComposerPromptInjectionState,
   getComposerProviderState,
   getComposerReasoningStep,
+  resolveComposerBottomRowMode,
 } from "./composerProviderState";
 import { readPromptUltrathink } from "./TraitsPicker";
 import { useApplyThreadModelPick } from "./useApplyThreadModelPick";
@@ -1146,7 +1148,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
-  const [isComposerCustomModelExpanded, setIsComposerCustomModelExpanded] = useState(false);
+  const hasStartedThread = threadHasStarted(activeThread);
+  const composerPinModeScopeKey = `${composerDraftTargetKey}:${hasStartedThread ? "1" : "0"}:${isEditingQueuedMessage ? "edit" : "compose"}`;
+  const [composerModeOverride, setComposerModeOverride] = useState<{
+    scopeKey: string;
+    mode: ComposerBottomRowMode;
+  } | null>(null);
   const [pendingPinnedModel, setPendingPinnedModel] = useState<{
     pin: ModelPin;
     phase: "waiting" | "entering";
@@ -2372,17 +2379,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         });
       const capturedDetachedSend =
         questionAttachmentTarget === null ? (captureDetachedSend?.() ?? null) : null;
-      const capturedSendContext =
-        capturedDetachedSend !== null
-          ? (() => {
-              pendingSendModelOverrideRef.current = modelOverride ?? null;
-              try {
-                return composerRef.current?.getSendContext() ?? null;
-              } finally {
-                pendingSendModelOverrideRef.current = null;
-              }
-            })()
-          : null;
+      let capturedSendContext: ReturnType<ChatComposerHandle["getSendContext"]> | null = null;
+      if (capturedDetachedSend !== null) {
+        pendingSendModelOverrideRef.current = modelOverride ?? null;
+        capturedSendContext = composerRef.current?.getSendContext() ?? null;
+        pendingSendModelOverrideRef.current = null;
+      }
       const capturedSubmissionTarget = submissionTarget;
       submitAfterDictation((transcribedText) => {
         const stillLive =
@@ -2485,10 +2487,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (showResumeAction && !activePendingProgress && promptRef.current.trim().length === 0) {
       event?.preventDefault();
       if (isSendBusy || environmentUnavailable !== null) return false;
+      setComposerModeOverride(null);
       onResume();
       return true;
     }
-    if (modelOverride && !noProviderAvailable && selectedInstanceId && selectedModel) {
+    if (
+      modelOverride &&
+      !isEditingQueuedMessage &&
+      !noProviderAvailable &&
+      selectedInstanceId &&
+      selectedModel
+    ) {
       // Preserve the model picker's current selection on the draft and thread target so the server
       // turn updating `serverThread.modelSelection` to the pinned model does not switch the picker.
       const draftStore = useComposerDraftStore.getState();
@@ -2527,6 +2536,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     pendingSendModelOverrideRef.current = null;
     setComposerSubmissionError(submission.validationMessage);
     if (!submission.didDispatch) return false;
+    setComposerModeOverride(null);
     onTypingGuardSend();
     if (shouldBlurMobileComposerOnSubmit()) {
       blurMobileComposerAfterSend();
@@ -2889,7 +2899,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           if (pendingPinnedModelTimerRef.current !== null) {
             window.clearTimeout(pendingPinnedModelTimerRef.current);
           }
-          setIsComposerCustomModelExpanded(false);
+          setComposerModeOverride({ scopeKey: composerPinModeScopeKey, mode: "pins" });
           setPendingPinnedModel({ pin, phase: "waiting" });
           pendingPinnedModelTimerRef.current = window.setTimeout(() => {
             pendingPinnedModelTimerRef.current = null;
@@ -4249,12 +4259,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         providerInstanceEntries.some(
                           (entry) => entry.instanceId === pendingPinnedModel.pin.provider,
                         )));
-                  const showCustomControlsInBottomRow =
-                    !hasPinnedModels || isComposerCustomModelExpanded;
+                  const isTurnRunning =
+                    (phase === "running" || phase === "connecting") && !draftRunsLocally;
+                  const activeModeOverride =
+                    composerModeOverride?.scopeKey === composerPinModeScopeKey
+                      ? composerModeOverride.mode
+                      : null;
+                  const { canUsePinMode, mode: composerBottomRowMode } =
+                    resolveComposerBottomRowMode({
+                      hasPinnedModels,
+                      hasPendingQuestion: activePendingProgress !== null,
+                      threadStarted: hasStartedThread,
+                      isTurnRunning,
+                      isEditingQueuedMessage,
+                      canResume: showResumeAction,
+                      override: activeModeOverride,
+                    });
+                  const showCustomControlsInBottomRow = composerBottomRowMode === "custom";
                   const modeSwapLabel = showCustomControlsInBottomRow
                     ? gt("Pinned models")
                     : gt("Custom model");
-                  const modeSwapButton = hasPinnedModels ? (
+                  const modeSwapButton = canUsePinMode ? (
                     <Tooltip>
                       <TooltipTrigger
                         render={
@@ -4266,7 +4291,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             data-chat-model-pins-expand="true"
                             onPointerDown={(event) => event.preventDefault()}
                             onClick={() =>
-                              setIsComposerCustomModelExpanded((expanded) => !expanded)
+                              setComposerModeOverride({
+                                scopeKey: composerPinModeScopeKey,
+                                mode: showCustomControlsInBottomRow ? "pins" : "custom",
+                              })
                             }
                             className="shrink-0"
                           />

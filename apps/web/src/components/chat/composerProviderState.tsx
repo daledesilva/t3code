@@ -197,3 +197,37 @@ export function resolveComposerTraitsInput(
   if (!persistence) return null;
   return { ...rest, ...persistence, modelOptions: selections };
 }
+
+export type ComposerBottomRowMode = "pins" | "custom";
+
+export interface ComposerBottomRowModeInput {
+  readonly hasPinnedModels: boolean;
+  readonly hasPendingQuestion: boolean;
+  readonly threadStarted: boolean;
+  readonly isTurnRunning: boolean;
+  readonly isEditingQueuedMessage: boolean;
+  readonly canResume: boolean;
+  readonly override: ComposerBottomRowMode | null;
+}
+
+export function resolveComposerBottomRowMode(input: ComposerBottomRowModeInput): {
+  readonly canUsePinMode: boolean;
+  readonly mode: ComposerBottomRowMode;
+} {
+  const canUsePinMode = input.hasPinnedModels && !input.hasPendingQuestion;
+  if (!canUsePinMode) {
+    return { canUsePinMode: false, mode: "custom" };
+  }
+  if (input.override !== null) {
+    return { canUsePinMode: true, mode: input.override };
+  }
+  const defaultToPinMode =
+    !input.threadStarted &&
+    !input.isTurnRunning &&
+    !input.isEditingQueuedMessage &&
+    !input.canResume;
+  return {
+    canUsePinMode: true,
+    mode: defaultToPinMode ? "pins" : "custom",
+  };
+}

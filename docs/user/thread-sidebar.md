@@ -35,6 +35,28 @@ Enabled by default (**Settings → General → Working section**, per device). U
 
 While enabled, Active is sorted by most recent return (manual reordering is paused until you turn it off).
 
+### Queue a follow-on thread
+
+To queue a new thread so it starts automatically after a working thread finishes, right-click the
+working thread in the sidebar and choose **Follow on thread on \<branch\>**, or drag a working thread
+from the sidebar into a new thread draft.
+
+When a draft is set up to queue:
+
+- **Wait for...** appears above the new-thread heading with links to the threads ahead of the
+  draft and shows which thread is currently running.
+- If other threads are already queued after the thread you selected, the new thread is inserted
+  directly after it and those threads appear under **Then run...**, below the composer.
+- Drag items within any visible queue to change their order, or drop a working thread from the
+  sidebar above, between, or below items in the queue.
+- Sending your first message queues the thread on the server. When the prior thread finishes and
+  goes idle, the next thread in the queue starts automatically and the queue display hides.
+
+On an existing conversation, drag a working thread from the sidebar onto **Wait for...**, which
+appears just above the message box. Messages you queue in that conversation sit below it, and
+they wait until those threads finish. This is available while the conversation is idle. Remove a
+thread from that list to send the next message immediately.
+
 ### Group threads by project (beta)
 
 Enable **Settings → Labs → Boring sidebar (group by project)** on web/desktop (per device) to group active threads into collapsible project folders. Pinned threads stay above; Snoozed and Settled stay below. In this mode, the Working section and sidebar drag-reordering are disabled (dragging a thread onto the composer still works).

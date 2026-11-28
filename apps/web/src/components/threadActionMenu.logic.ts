@@ -6,6 +6,7 @@ import { m, type MessageResolver } from "../i18n/messages";
 
 export type ThreadActionMenuId =
   | "find"
+  | "follow-on-thread-on-branch"
   | "new-thread-on-branch"
   | "filter-by-project"
   | "turn-into-project"
@@ -101,6 +102,7 @@ export interface ThreadActionMenuState {
   /** False where no inline title editor is rendered, such as sidebar search results. */
   readonly canRename?: boolean;
   readonly branch: string | null;
+  readonly canFollowOnBranch?: boolean;
   readonly projectFilter: {
     readonly label: string;
     readonly isActive: boolean;
@@ -133,6 +135,7 @@ export interface ThreadActionMenuState {
 export function threadActionRequiresOperate(action: ThreadActionMenuId): boolean {
   return ![
     "find",
+    "follow-on-thread-on-branch",
     "new-thread-on-branch",
     "project-settings",
     "mark-unread",
@@ -169,9 +172,19 @@ export function buildThreadActionMenuItems(
   state: ThreadActionMenuState,
   resolve: MessageResolver = m,
 ): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
+  const separatorAfterBranchActions = Boolean(state.branch && state.canFollowOnBranch);
   const items: ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> = [
     ...(state.canFind
       ? [{ id: "find" as const, label: resolve(msg("Find in thread")), icon: "text-search" }]
+      : []),
+    ...(state.branch && state.canFollowOnBranch
+      ? [
+          {
+            id: "follow-on-thread-on-branch" as const,
+            label: resolve(msg("Follow on thread on {branch}", { branch: state.branch })),
+            icon: "list-plus",
+          },
+        ]
       : []),
     ...(state.branch
       ? [
@@ -185,8 +198,18 @@ export function buildThreadActionMenuItems(
     ...(state.supports.pinning
       ? [
           state.isPinned
-            ? { id: "unpin" as const, label: resolve(msg("Unpin thread")), icon: "pin-off" }
-            : { id: "pin" as const, label: resolve(msg("Pin thread")), icon: "pin" },
+            ? {
+                id: "unpin" as const,
+                label: resolve(msg("Unpin thread")),
+                icon: "pin-off",
+                separatorBefore: separatorAfterBranchActions,
+              }
+            : {
+                id: "pin" as const,
+                label: resolve(msg("Pin thread")),
+                icon: "pin",
+                separatorBefore: separatorAfterBranchActions,
+              },
         ]
       : []),
     ...(state.supports.settlement
@@ -196,8 +219,14 @@ export function buildThreadActionMenuItems(
                 id: "unsettle" as const,
                 label: resolve(msg("Un-settle thread")),
                 icon: "circle-check",
+                separatorBefore: !state.supports.pinning && separatorAfterBranchActions,
               }
-            : { id: "settle" as const, label: resolve(msg("Settle thread")), icon: "circle-check" },
+            : {
+                id: "settle" as const,
+                label: resolve(msg("Settle thread")),
+                icon: "circle-check",
+                separatorBefore: !state.supports.pinning && separatorAfterBranchActions,
+              },
         ]
       : []),
     ...(state.supports.snooze

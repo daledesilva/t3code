@@ -1023,6 +1023,7 @@ export function useComposerSend(input: ComposerSendInput) {
     } = planComposerTurn({
       messageText: messageTextForSend,
       sendQueuesBehindSetup,
+      hasStartAfterTrigger: Boolean(activeThread.startAfterThreadId),
       isServerThread,
       activeMessageCount,
       sendEnvMode,
@@ -1558,6 +1559,9 @@ export function useComposerSend(input: ComposerSendInput) {
                       branch: activeThreadBranch,
                       worktreePath: activeThread.worktreePath,
                       createdAt: activeThread.createdAt,
+                      ...(activeThread.startAfterThreadId
+                        ? { startAfterThreadId: activeThread.startAfterThreadId }
+                        : {}),
                     },
                   }
                 : {}),

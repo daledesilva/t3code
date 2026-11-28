@@ -659,6 +659,9 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.unsettle":
     case "thread.snooze":
     case "thread.unsnooze":
+    case "thread.start-after.set":
+    case "thread.start-after.reorder":
+    case "thread.start-after.clear":
     case "thread.auto-settle.set":
     case "thread.pin":
     case "thread.unpin":
@@ -4158,6 +4161,57 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
 
+    let resolvedStartAfterThreadId: ThreadId | null = null;
+    let existingFollowersToSplice: ReadonlyArray<OrchestrationV2AppThread> = [];
+    if (command.startAfterThreadId != null) {
+      if (command.startAfterThreadId === command.threadId) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${command.threadId} cannot start after itself.`,
+        });
+      }
+      const targetProjection = yield* projectionStore
+        .getThreadRecords(command.startAfterThreadId, ["runs"])
+        .pipe(
+          Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+          Effect.mapError(
+            (cause) =>
+              new OrchestratorProjectionError({
+                threadId: command.startAfterThreadId!,
+                cause,
+              }),
+          ),
+        );
+      if (
+        targetProjection === null ||
+        targetProjection.thread.deletedAt !== null ||
+        targetProjection.thread.archivedAt !== null
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Start-after target thread ${command.startAfterThreadId} is not active.`,
+        });
+      }
+      const targetIsNotIdle =
+        (targetProjection.thread.startAfterThreadId ?? null) !== null ||
+        targetProjection.runs.some(
+          (run) =>
+            run.status === "preparing" ||
+            run.status === "queued" ||
+            run.status === "starting" ||
+            run.status === "running" ||
+            run.status === "waiting",
+        );
+      if (targetIsNotIdle) {
+        resolvedStartAfterThreadId = command.startAfterThreadId;
+        existingFollowersToSplice = yield* projectionStore
+          .getStartAfterFollowerThreads(command.startAfterThreadId)
+          .pipe(mapDispatchError(command));
+      }
+    }
+
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
     const thread: OrchestrationV2AppThread = {
@@ -4195,6 +4249,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       settledAt: null,
       snoozedUntil: null,
       snoozedAt: null,
+      startAfterThreadId: resolvedStartAfterThreadId,
       lastVisitedAt: null,
       deletedAt: null,
     };
@@ -4206,6 +4261,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       occurredAt: now,
       payload: thread,
     });
+    for (const follower of existingFollowersToSplice) {
+      if (follower.id === command.threadId) continue;
+      yield* emitEvent({
+        type: "thread.start-after-updated",
+        threadId: follower.id,
+        providerInstanceId: follower.providerInstanceId,
+        occurredAt: now,
+        payload: {
+          ...follower,
+          startAfterThreadId: command.threadId,
+          updatedAt: now,
+        },
+      });
+    }
     if (command.importedNativeThread !== undefined) {
       yield* emitEvent({
         type: "provider-thread.updated",
@@ -8161,7 +8230,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       dispatchMode.type === "defer_start" ||
       dispatchMode.type === "start_immediately" ||
       dispatchMode.type === "queue_after_active";
-    const shouldQueue = queueBehindRun !== undefined && startsOrQueuesRun;
+    const waitingOnStartAfterThread =
+      (projection.thread.startAfterThreadId ?? null) !== null &&
+      dispatchMode.type !== "defer_start";
+    const shouldQueue =
+      (queueBehindRun !== undefined || waitingOnStartAfterThread) && startsOrQueuesRun;
     // An explicit pick queued ahead reaches the thread only when its run starts. A goal or
     // restart command that stops the active run goes first, so nothing queued applies before it.
     // Buffered provider wakes drain output their own provider already produced.
@@ -8195,7 +8268,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       (command.creationSource === "web" || command.creationSource === "mobile") &&
       command.scheduledTaskId === undefined;
     const heldRunsToRelease =
-      sentByUserFromClient && startsOrQueuesRun && !worktreeSetupUnresolved
+      sentByUserFromClient &&
+      startsOrQueuesRun &&
+      !worktreeSetupUnresolved &&
+      !waitingOnStartAfterThread
         ? projection.runs.filter((run) => run.status === "queued" && run.queueHeld === true)
         : [];
     const releasedAt = yield* DateTime.now;
@@ -8222,10 +8298,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       const queueProviderThread =
         activeProviderThread ??
-        projection.providerThreads.find(
-          (candidate) => candidate.id === queueBehindRun.providerThreadId,
-        );
-      if (queueProviderThread === undefined) {
+        (queueBehindRun === undefined
+          ? undefined
+          : projection.providerThreads.find(
+              (candidate) => candidate.id === queueBehindRun.providerThreadId,
+            ));
+      if (queueBehindRun !== undefined && queueProviderThread === undefined) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
@@ -8237,7 +8315,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const runId = idAllocator.derive.run({ threadId: command.threadId, ordinal });
       const targetProviderThread = freshContext
         ? undefined
-        : modelSelection.instanceId === queueProviderThread.providerInstanceId
+        : queueProviderThread !== undefined &&
+            modelSelection.instanceId === queueProviderThread.providerInstanceId
           ? queueProviderThread
           : rootProviderThreadsForProvider(projection, modelSelection.instanceId)[0];
       const queuedAdapter = yield* providerAdapters
@@ -8284,7 +8363,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const attemptId = idAllocator.derive.runAttempt({ runId, attemptOrdinal: 1 });
       const rootNodeId = idAllocator.derive.rootNode({ runId });
       const checkpointScope =
-        queueBehindRun.status === "preparing" || worktreeMissingRun !== undefined
+        queueBehindRun === undefined ||
+        queueBehindRun.status === "preparing" ||
+        worktreeMissingRun !== undefined
           ? null
           : yield* runtimePolicy.resolve({ thread: projection.thread, modelSelection }).pipe(
               Effect.flatMap((resolvedRuntimePolicy) =>
@@ -8317,6 +8398,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       // Stop still holds wakes that arrive before the active run settles.
       const wakeSkipsHold =
         !worktreeSetupUnresolved &&
+        !waitingOnStartAfterThread &&
         activeRun !== undefined &&
         queueIsHeld &&
         command.createdBy === "agent" &&
@@ -8362,7 +8444,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(command.explicitQueue === true ? { explicitQueue: true as const } : {}),
         ...(steerWhenReadyRunId === undefined ? {} : { steerWhenReadyRunId }),
         // A restart cancels its run; nobody knows whether the provider read the steer, so a person decides.
-        ...(worktreeMissingRun !== undefined ||
+        ...(waitingOnStartAfterThread ||
+        worktreeMissingRun !== undefined ||
         steerFollowUpSource?.status === "cancelled" ||
         (heldRunsToRelease.length === 0 &&
           queueIsHeld &&
@@ -12998,6 +13081,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           updatedAt: now,
         },
       });
+      if ((projection.thread.startAfterThreadId ?? null) !== null) {
+        yield* emitEvent({
+          type: "run.updated",
+          threadId: command.threadId,
+          runId: state.run.id,
+          nodeId: state.rootNode.id,
+          providerInstanceId: state.run.providerInstanceId,
+          occurredAt: now,
+          payload: {
+            ...state.run,
+            status: "queued",
+            queueHeld: true,
+            queuePosition: state.run.queuePosition ?? 1,
+          },
+        });
+        return;
+      }
       yield* emitEvent({
         type: "run.updated",
         threadId: command.threadId,
@@ -13208,6 +13308,217 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
   });
 
+  const isThreadProjectionNotIdle = (projection: {
+    readonly thread: OrchestrationV2AppThread;
+    readonly runs: ReadonlyArray<OrchestrationV2Run>;
+  }): boolean =>
+    projection.thread.deletedAt === null &&
+    projection.thread.archivedAt === null &&
+    ((projection.thread.startAfterThreadId ?? null) !== null ||
+      projection.runs.some(
+        (run) =>
+          run.status === "preparing" ||
+          run.status === "queued" ||
+          run.status === "starting" ||
+          run.status === "running" ||
+          run.status === "waiting",
+      ));
+
+  const dispatchThreadStartAfterSet = Effect.fn("Orchestrator.dispatchThreadStartAfterSet")(
+    function* (
+      command: Extract<
+        OrchestrationV2Command,
+        { readonly type: "thread.start-after.set" | "thread.start-after.reorder" }
+      >,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    ) {
+      if (command.threadId === command.startAfterThreadId) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${command.threadId} cannot start after itself.`,
+        });
+      }
+      const projection = yield* loadProjectionForCommand(command, ["runs"]);
+      if (projection.thread.deletedAt !== null || projection.thread.archivedAt !== null) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${command.threadId} is not active.`,
+        });
+      }
+      if (projection.runs.some(isActiveRun)) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${command.threadId} is already running and cannot be queued after another thread.`,
+        });
+      }
+
+      const targetProjection = yield* projectionStore
+        .getThreadRecords(command.startAfterThreadId, ["runs"])
+        .pipe(
+          Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+          mapDispatchError(command),
+        );
+      if (
+        targetProjection === null ||
+        targetProjection.thread.deletedAt !== null ||
+        targetProjection.thread.archivedAt !== null
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Start-after target thread ${command.startAfterThreadId} is not active.`,
+        });
+      }
+
+      // Check for cycles in the startAfterThreadId chain before splicing.
+      const visited = new Set<ThreadId>([command.threadId]);
+      let cursor: ThreadId | null = targetProjection.thread.startAfterThreadId ?? null;
+      for (let depth = 0; cursor !== null && depth < 64; depth += 1) {
+        if (visited.has(cursor)) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: `Setting thread ${command.threadId} to start after ${command.startAfterThreadId} would create a cycle.`,
+          });
+        }
+        visited.add(cursor);
+        const nextThread = yield* projectionStore
+          .getThread(cursor)
+          .pipe(
+            Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+            mapDispatchError(command),
+          );
+        cursor = nextThread?.startAfterThreadId ?? null;
+      }
+
+      const now = yield* DateTime.now;
+      const emitEvent = emit(events, command);
+      const oldPred = projection.thread.startAfterThreadId ?? null;
+      const oldFollowers = yield* projectionStore
+        .getStartAfterFollowerThreads(command.threadId)
+        .pipe(mapDispatchError(command));
+
+      if (!isThreadProjectionNotIdle(targetProjection)) {
+        for (const follower of oldFollowers) {
+          if (follower.id === command.threadId) continue;
+          yield* emitEvent({
+            type: "thread.start-after-updated",
+            threadId: follower.id,
+            providerInstanceId: follower.providerInstanceId,
+            occurredAt: now,
+            payload: {
+              ...follower,
+              startAfterThreadId: oldPred,
+              updatedAt: now,
+            },
+          });
+        }
+        yield* emitEvent({
+          type: "thread.start-after-updated",
+          threadId: command.threadId,
+          providerInstanceId: projection.thread.providerInstanceId,
+          occurredAt: now,
+          payload: {
+            ...projection.thread,
+            startAfterThreadId: null,
+            updatedAt: now,
+          },
+        });
+        for (const run of projection.runs) {
+          if (run.status === "queued" && run.queueHeld === true) {
+            yield* emitEvent({
+              type: "run.updated",
+              threadId: command.threadId,
+              runId: run.id,
+              providerInstanceId: run.providerInstanceId,
+              occurredAt: now,
+              payload: { ...run, queueHeld: false },
+            });
+          }
+        }
+        return;
+      }
+
+      if (oldPred === command.startAfterThreadId) {
+        yield* emitEvent({
+          type: "thread.start-after-updated",
+          threadId: command.threadId,
+          providerInstanceId: projection.thread.providerInstanceId,
+          occurredAt: now,
+          payload: {
+            ...projection.thread,
+            startAfterThreadId: command.startAfterThreadId,
+            updatedAt: now,
+          },
+        });
+        return;
+      }
+
+      // Splice out of old position so followers of command.threadId now follow oldPred.
+      for (const follower of oldFollowers) {
+        if (follower.id === command.threadId || follower.id === command.startAfterThreadId) {
+          continue;
+        }
+        yield* emitEvent({
+          type: "thread.start-after-updated",
+          threadId: follower.id,
+          providerInstanceId: follower.providerInstanceId,
+          occurredAt: now,
+          payload: {
+            ...follower,
+            startAfterThreadId: oldPred,
+            updatedAt: now,
+          },
+        });
+      }
+
+      // Splice into new position after command.startAfterThreadId.
+      const targetFollowers = yield* projectionStore
+        .getStartAfterFollowerThreads(command.startAfterThreadId)
+        .pipe(mapDispatchError(command));
+      yield* emitEvent({
+        type: "thread.start-after-updated",
+        threadId: command.threadId,
+        providerInstanceId: projection.thread.providerInstanceId,
+        occurredAt: now,
+        payload: {
+          ...projection.thread,
+          startAfterThreadId: command.startAfterThreadId,
+          updatedAt: now,
+        },
+      });
+      for (const follower of targetFollowers) {
+        if (follower.id === command.threadId) continue;
+        yield* emitEvent({
+          type: "thread.start-after-updated",
+          threadId: follower.id,
+          providerInstanceId: follower.providerInstanceId,
+          occurredAt: now,
+          payload: {
+            ...follower,
+            startAfterThreadId: command.threadId,
+            updatedAt: now,
+          },
+        });
+      }
+      for (const run of projection.runs) {
+        if (run.status === "queued" && run.queueHeld !== true) {
+          yield* emitEvent({
+            type: "run.updated",
+            threadId: command.threadId,
+            runId: run.id,
+            providerInstanceId: run.providerInstanceId,
+            occurredAt: now,
+            payload: { ...run, queueHeld: true },
+          });
+        }
+      }
+    },
+  );
+
   // Ends each native subagent's record, its own thread's runless root turns, and the
   // subagents it started there, which a provider can record on that thread rather than its parent's.
   const endNativeSubagentTrees = Effect.fn("Orchestrator.endNativeSubagentTrees")(
@@ -13278,6 +13589,202 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
       }
     },
+  );
+
+  const dispatchThreadStartAfterClear = Effect.fn("Orchestrator.dispatchThreadStartAfterClear")(
+    function* (
+      command: Extract<OrchestrationV2Command, { readonly type: "thread.start-after.clear" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    ) {
+      const projection = yield* loadProjectionForCommand(command, ["runs"]);
+      if (projection.thread.deletedAt !== null || projection.thread.archivedAt !== null) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${command.threadId} is not active.`,
+        });
+      }
+      const now = yield* DateTime.now;
+      const emitEvent = emit(events, command);
+      const oldPred = projection.thread.startAfterThreadId ?? null;
+      const followers = yield* projectionStore
+        .getStartAfterFollowerThreads(command.threadId)
+        .pipe(mapDispatchError(command));
+      for (const follower of followers) {
+        if (follower.id === command.threadId) continue;
+        yield* emitEvent({
+          type: "thread.start-after-updated",
+          threadId: follower.id,
+          providerInstanceId: follower.providerInstanceId,
+          occurredAt: now,
+          payload: {
+            ...follower,
+            startAfterThreadId: oldPred,
+            updatedAt: now,
+          },
+        });
+      }
+      yield* emitEvent({
+        type: "thread.start-after-updated",
+        threadId: command.threadId,
+        providerInstanceId: projection.thread.providerInstanceId,
+        occurredAt: now,
+        payload: {
+          ...projection.thread,
+          startAfterThreadId: null,
+          updatedAt: now,
+        },
+      });
+      for (const run of projection.runs) {
+        if (run.status === "queued" && run.queueHeld === true) {
+          yield* emitEvent({
+            type: "run.updated",
+            threadId: command.threadId,
+            runId: run.id,
+            providerInstanceId: run.providerInstanceId,
+            occurredAt: now,
+            payload: { ...run, queueHeld: false },
+          });
+        }
+      }
+    },
+  );
+
+  const releaseFollowersIfThreadIdle = Effect.fn("Orchestrator.releaseFollowersIfThreadIdle")(
+    function* (initialThreadId: ThreadId) {
+      const queue: Array<ThreadId> = [initialThreadId];
+      const visited = new Set<ThreadId>();
+      while (queue.length > 0) {
+        const currentId = queue.shift()!;
+        if (visited.has(currentId)) continue;
+        visited.add(currentId);
+
+        const currentProjection = yield* projectionStore
+          .getThreadRecords(currentId, ["runs"])
+          .pipe(
+            Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+          );
+        const isDeletedOrArchived =
+          currentProjection === null ||
+          currentProjection.thread.deletedAt !== null ||
+          currentProjection.thread.archivedAt !== null;
+        if (!isDeletedOrArchived && isThreadProjectionNotIdle(currentProjection)) {
+          continue;
+        }
+
+        const followers = yield* projectionStore.getStartAfterFollowerThreads(currentId);
+        if (followers.length === 0) continue;
+
+        let activePredecessorId: ThreadId | null = null;
+        const predId = currentProjection?.thread.startAfterThreadId ?? null;
+        if (isDeletedOrArchived && predId !== null && predId !== currentId) {
+          const predProjection = yield* projectionStore
+            .getThreadRecords(predId, ["runs"])
+            .pipe(
+              Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+            );
+          if (predProjection !== null && isThreadProjectionNotIdle(predProjection)) {
+            activePredecessorId = predId;
+          }
+        }
+
+        const now = yield* DateTime.now;
+        if (activePredecessorId !== null) {
+          for (const follower of followers) {
+            yield* threadDispatch.withLock(
+              follower.id,
+              Effect.gen(function* () {
+                const fresh = yield* projectionStore.getThread(follower.id).pipe(
+                  Effect.catchTags({
+                    ProjectionStoreThreadNotFoundError: () => Effect.succeed(null),
+                  }),
+                );
+                if (
+                  fresh === null ||
+                  fresh.deletedAt !== null ||
+                  fresh.archivedAt !== null ||
+                  fresh.startAfterThreadId !== currentId
+                ) {
+                  return;
+                }
+                yield* writeSystemEvents([
+                  {
+                    type: "thread.start-after-updated",
+                    threadId: fresh.id,
+                    providerInstanceId: fresh.providerInstanceId,
+                    occurredAt: now,
+                    payload: {
+                      ...fresh,
+                      startAfterThreadId: activePredecessorId,
+                      updatedAt: now,
+                    },
+                  },
+                ]);
+              }),
+            );
+          }
+          continue;
+        }
+
+        for (const follower of followers) {
+          yield* threadDispatch.withLock(
+            follower.id,
+            Effect.gen(function* () {
+              const followerProjection = yield* projectionStore
+                .getThreadRecords(follower.id, ["runs"])
+                .pipe(
+                  Effect.catchTags({
+                    ProjectionStoreThreadNotFoundError: () => Effect.succeed(null),
+                  }),
+                );
+              if (
+                followerProjection === null ||
+                followerProjection.thread.deletedAt !== null ||
+                followerProjection.thread.archivedAt !== null ||
+                followerProjection.thread.startAfterThreadId !== currentId
+              ) {
+                return;
+              }
+              const heldRuns = followerProjection.runs.filter(
+                (run) => run.status === "queued" && run.queueHeld === true,
+              );
+              yield* writeSystemEvents([
+                {
+                  type: "thread.start-after-updated",
+                  threadId: follower.id,
+                  providerInstanceId: followerProjection.thread.providerInstanceId,
+                  occurredAt: now,
+                  payload: {
+                    ...followerProjection.thread,
+                    startAfterThreadId: null,
+                    updatedAt: now,
+                  },
+                },
+                ...heldRuns.map((run) => ({
+                  type: "run.updated" as const,
+                  threadId: follower.id,
+                  runId: run.id,
+                  providerInstanceId: run.providerInstanceId,
+                  occurredAt: now,
+                  payload: { ...run, queueHeld: false },
+                })),
+              ]);
+              yield* startNextQueuedRun(follower.id);
+            }),
+          );
+          queue.push(follower.id);
+        }
+      }
+    },
+    (effect, initialThreadId) =>
+      effect.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Failed to release follow-on threads", {
+            threadId: initialThreadId,
+            cause,
+          }),
+        ),
+      ),
   );
 
   const settleBackgroundWork = Effect.fn("Orchestrator.settleBackgroundWork")(function* (input: {
@@ -16331,6 +16838,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "provider.switch":
         yield* dispatchThreadMutation(command, events, effects);
         break;
+      case "thread.start-after.set":
+      case "thread.start-after.reorder":
+        yield* dispatchThreadStartAfterSet(command, events);
+        break;
+      case "thread.start-after.clear":
+        yield* dispatchThreadStartAfterClear(command, events);
+        break;
       case "thread.metadata.update": {
         const continuation = metadataUpdateContinuation(command);
         if (continuation !== undefined) yield* refuseNativeSubagentMessage(command);
@@ -16500,6 +17014,43 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           });
         }
         const now = yield* DateTime.now;
+        if ((projection.thread.startAfterThreadId ?? null) !== null) {
+          const oldPred = projection.thread.startAfterThreadId ?? null;
+          const followers = yield* projectionStore
+            .getStartAfterFollowerThreads(command.threadId)
+            .pipe(mapDispatchError(command));
+          for (const follower of followers) {
+            if (follower.id === command.threadId) continue;
+            yield* emit(
+              events,
+              command,
+            )({
+              type: "thread.start-after-updated",
+              threadId: follower.id,
+              providerInstanceId: follower.providerInstanceId,
+              occurredAt: now,
+              payload: {
+                ...follower,
+                startAfterThreadId: oldPred,
+                updatedAt: now,
+              },
+            });
+          }
+          yield* emit(
+            events,
+            command,
+          )({
+            type: "thread.start-after-updated",
+            threadId: command.threadId,
+            providerInstanceId: projection.thread.providerInstanceId,
+            occurredAt: now,
+            payload: {
+              ...projection.thread,
+              startAfterThreadId: null,
+              updatedAt: now,
+            },
+          });
+        }
         const queued = projection.runs.filter((run) => run.status === "queued");
         for (const run of queued) {
           yield* emit(
@@ -16514,7 +17065,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             payload: { ...run, queueHeld: false },
           });
         }
-        if (queued.length === 0) {
+        if (queued.length === 0 && (projection.thread.startAfterThreadId ?? null) === null) {
           yield* emit(
             events,
             command,
@@ -16641,7 +17192,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           }),
       ),
     );
-    if (command.type === "queue.resume" || command.type === "queued-run.start") {
+    if (
+      command.type === "queue.resume" ||
+      command.type === "queued-run.start" ||
+      command.type === "thread.start-after.set" ||
+      command.type === "thread.start-after.reorder" ||
+      command.type === "thread.start-after.clear"
+    ) {
       yield* mapDispatchError(command)(
         startNextQueuedRun(command.threadId, {
           userStarted: true,
@@ -16896,6 +17453,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     if (
       command.type === "queue.resume" ||
       command.type === "queued-run.start" ||
+      command.type === "thread.start-after.set" ||
+      command.type === "thread.start-after.reorder" ||
+      command.type === "thread.start-after.clear" ||
       (command.type === "thread.runtime-mode.set" && runtimeModeCeiling !== undefined)
     ) {
       yield* mapDispatchError(command)(
@@ -16999,9 +17559,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ),
         ),
       );
-      return yield* command.type === "thread.delete"
-        ? threadDispatch.withDeletionLock(cascade)
-        : cascade;
+      const dispatched =
+        command.type === "thread.delete" ? threadDispatch.withDeletionLock(cascade) : cascade;
+      return yield* command.type === "thread.delete" || command.type === "thread.archive"
+        ? dispatched.pipe(Effect.tap(() => releaseFollowersIfThreadIdle(command.threadId)))
+        : dispatched;
     }
     // Taken before the lineage read, so a message whose read yields keeps its
     // place ahead of later messages to the same thread.
@@ -17133,6 +17695,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               Effect.logWarning("Failed to start the next queued V2 run", { threadId, cause }),
             ),
           );
+        yield* releaseFollowersIfThreadIdle(threadId);
       }
       yield* updateDelegatedParentTask(threadId, run.id);
     },

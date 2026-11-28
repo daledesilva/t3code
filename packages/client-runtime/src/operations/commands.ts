@@ -99,6 +99,7 @@ export interface CreateThreadInput extends CommandMetadata {
   readonly interactionMode: ProviderInteractionMode;
   readonly branch: string | null;
   readonly worktreePath: string | null;
+  readonly startAfterThreadId?: ThreadId | null;
 }
 
 export interface ThreadCommandInput extends CommandMetadata {
@@ -139,6 +140,16 @@ export interface UnsnoozeThreadInput extends ThreadCommandInput {
   readonly reason: "user";
 }
 
+export interface SetThreadStartAfterInput extends ThreadCommandInput {
+  readonly startAfterThreadId: ThreadId;
+}
+
+export interface ReorderThreadStartAfterInput extends ThreadCommandInput {
+  readonly startAfterThreadId: ThreadId;
+}
+
+export type ClearThreadStartAfterInput = ThreadCommandInput;
+
 export interface VisitThreadInput extends ThreadCommandInput {
   readonly visitedAt: string;
   /** Counts toward search frecency; `searchQuery` is the palette query that picked it. */
@@ -176,6 +187,7 @@ interface StartThreadBootstrap {
     readonly interactionMode: ProviderInteractionMode;
     readonly branch: string | null;
     readonly worktreePath: string | null;
+    readonly startAfterThreadId?: ThreadId | null;
     readonly createdAt: string;
   };
   readonly prepareWorktree?: {
@@ -514,6 +526,9 @@ export const createThread = Effect.fn("EnvironmentCommands.createThread")(functi
     interactionMode: input.interactionMode,
     branch: input.branch,
     worktreePath: input.worktreePath,
+    ...(input.startAfterThreadId === undefined
+      ? {}
+      : { startAfterThreadId: input.startAfterThreadId }),
   });
 });
 
@@ -524,7 +539,8 @@ function simpleThreadCommand(
     | "thread.settle"
     | "thread.pin"
     | "thread.unpin"
-    | "thread.guest-share.close",
+    | "thread.guest-share.close"
+    | "thread.start-after.clear",
   input: ThreadCommandInput,
 ) {
   return allocateCommandId(input).pipe(
@@ -691,6 +707,34 @@ export const unsnoozeThread = Effect.fn("EnvironmentCommands.unsnoozeThread")(fu
   });
 });
 
+export const setThreadStartAfter = Effect.fn("EnvironmentCommands.setThreadStartAfter")(function* (
+  input: SetThreadStartAfterInput,
+) {
+  return yield* dispatch({
+    type: "thread.start-after.set",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    startAfterThreadId: input.startAfterThreadId,
+  });
+});
+
+export const reorderThreadStartAfter = Effect.fn("EnvironmentCommands.reorderThreadStartAfter")(
+  function* (input: ReorderThreadStartAfterInput) {
+    return yield* dispatch({
+      type: "thread.start-after.reorder",
+      commandId: yield* allocateCommandId(input),
+      threadId: input.threadId,
+      startAfterThreadId: input.startAfterThreadId,
+    });
+  },
+);
+
+export const clearThreadStartAfter = Effect.fn("EnvironmentCommands.clearThreadStartAfter")(
+  function* (input: ClearThreadStartAfterInput) {
+    return yield* simpleThreadCommand("thread.start-after.clear", input);
+  },
+);
+
 export const visitThread = Effect.fn("EnvironmentCommands.visitThread")(function* (
   input: VisitThreadInput,
 ) {
@@ -837,6 +881,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       runtimeMode: input.runtimeMode,
       interactionMode: input.interactionMode,
       workspaceStrategy,
+      ...(bootstrap?.startAfterThreadId === undefined
+        ? {}
+        : { startAfterThreadId: bootstrap.startAfterThreadId }),
       initialMessage: {
         messageId: input.message.messageId,
         text: input.message.text,

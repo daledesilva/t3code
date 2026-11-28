@@ -663,6 +663,7 @@ type ThreadStatusInput = Pick<
   lastVisitedAt?: string | null | undefined;
   pendingBackgroundTasks?: SidebarThreadSummary["pendingBackgroundTasks"] | undefined;
   blockedOnThreadWait?: boolean | undefined;
+  startAfterThreadId?: ThreadId | null | undefined;
 };
 
 // Read at event time: subscribing Sidebar to terminal or modifier state re-renders every row.
@@ -959,7 +960,9 @@ type SidebarThreadStatusInput = Pick<
   | "pendingGuestMessageCount"
   | "runtime"
   | "blockedOnThreadWait"
->;
+> & {
+  startAfterThreadId?: ThreadId | null | undefined;
+};
 
 export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): SidebarThreadStatus {
   if (thread.hasPendingApprovals || thread.pendingSubagentRequest === "approval") {
@@ -984,7 +987,7 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   ) {
     return "working";
   }
-  if (thread.runtime?.status === "idle") {
+  if (thread.runtime?.status === "idle" || thread.startAfterThreadId != null) {
     return "waiting";
   }
   if (thread.runtime?.status === "failed") {
@@ -1293,7 +1296,12 @@ export function resolveThreadStatusPill(input: {
     dotClass: "bg-sidebar-muted-foreground",
     pulse: false,
   };
-  if (thread.runtime?.status === "running" && thread.blockedOnThreadWait === true) return waiting;
+  if (
+    (thread.runtime?.status === "running" && thread.blockedOnThreadWait === true) ||
+    thread.startAfterThreadId != null
+  ) {
+    return waiting;
+  }
 
   // A failed run goes to the inbox even while background work holds the thread.
   if (hasUnseenRunFailure(thread)) {

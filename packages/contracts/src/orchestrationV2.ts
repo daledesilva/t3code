@@ -544,6 +544,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   snoozedUntil: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   snoozedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   lastSnoozeWakeAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
+  startAfterThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecovery)),
   guestShare: Schema.optional(Schema.NullOr(ThreadGuestShare)),
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
@@ -2210,6 +2211,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.unsettled",
       "thread.snoozed",
       "thread.unsnoozed",
+      "thread.start-after-updated",
       "thread.pinned",
       "thread.auto-settle-set",
       "thread.unpinned",
@@ -2481,6 +2483,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   unsettledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   snoozedUntil: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   snoozedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
+  startAfterThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecovery)),
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
@@ -3171,6 +3174,7 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.unsettled",
       "thread.snoozed",
       "thread.unsnoozed",
+      "thread.start-after-updated",
       "thread.pinned",
       "thread.auto-settle-set",
       "thread.unpinned",
@@ -3338,6 +3342,7 @@ export const OrchestrationV2Command = Schema.Union([
     interactionMode: ProviderInteractionMode,
     branch: Schema.NullOr(GitRefName),
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+    startAfterThreadId: Schema.optional(Schema.NullOr(ThreadId)),
     /** Only the server sets this; a client's thread.create never carries one. */
     linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
     /** Only the server sets this, with `linkOrigin`, for a linked environment's delegated task. */
@@ -3434,6 +3439,23 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     reason: Schema.Literal("user"),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.start-after.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    startAfterThreadId: ThreadId,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.start-after.reorder"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    startAfterThreadId: ThreadId,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.start-after.clear"),
+    commandId: CommandId,
+    threadId: ThreadId,
   }),
   Schema.Struct({
     type: Schema.Literal("thread.auto-settle.set"),
@@ -4190,6 +4212,7 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
+  startAfterThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   initialMessage: Schema.optional(
     Schema.Struct({
       messageId: Schema.optional(MessageId),

@@ -23,9 +23,11 @@ import {
   elapsedShare,
   exhaustedUsageWindow,
   paceOf,
+  formatRunUsageUsedPercent,
   paceRemainingPercent,
   usesChatGptSharing,
   resolveNewThreadModelSelection,
+  resolveRunUsageLimitWindows,
 } from "./usageLimits.ts";
 import { collectLimitNotices } from "./usageLimitsCopy.ts";
 
@@ -2079,5 +2081,174 @@ describe("ChatGPT sharing presentation", () => {
         auth: { status: "unauthenticated", subscriptionSharing: true },
       }),
     ).toBe(false);
+  });
+});
+
+describe("resolveRunUsageLimitWindows", () => {
+  const checkedBefore = "2026-09-03T11:55:00.000Z";
+  const checkedAfter = "2026-09-03T12:00:00.000Z";
+
+  it("computes remaining before, remaining after, and used delta per window", () => {
+    const result = resolveRunUsageLimitWindows({
+      driver: ProviderDriverKind.make("claudeAgent"),
+      model: "claude-sonnet-4-5",
+      before: {
+        checkedAt: checkedBefore,
+        windows: [
+          { id: "five_hour", kind: "session", label: "Session", usedPercent: 20 },
+          { id: "seven_day", kind: "weekly", label: "Weekly", usedPercent: 45 },
+          { id: "seven_day_sonnet", kind: "weekly", label: "Weekly · Sonnet", usedPercent: 30 },
+          { id: "seven_day_opus", kind: "weekly", label: "Weekly · Opus", usedPercent: 10 },
+        ],
+      },
+      after: {
+        checkedAt: checkedAfter,
+        windows: [
+          { id: "seven_day", kind: "weekly", label: "Weekly", usedPercent: 48 },
+          { id: "five_hour", kind: "session", label: "Session", usedPercent: 32 },
+          { id: "seven_day_sonnet", kind: "weekly", label: "Weekly · Sonnet", usedPercent: 35 },
+          { id: "seven_day_opus", kind: "weekly", label: "Weekly · Opus", usedPercent: 10 },
+        ],
+      },
+    });
+    expect(
+      result.map((entry) => ({
+        id: entry.id,
+        remainingBefore: entry.remainingBefore,
+        remainingAfter: entry.remainingAfter,
+        usedDelta: entry.usedDelta,
+      })),
+    ).toEqual([
+      { id: "five_hour", remainingBefore: 80, remainingAfter: 68, usedDelta: 12 },
+      { id: "seven_day", remainingBefore: 55, remainingAfter: 52, usedDelta: 3 },
+      { id: "seven_day_sonnet", remainingBefore: 70, remainingAfter: 65, usedDelta: 5 },
+    ]);
+  });
+
+  it("clamps delta to 0 when a window resets during the run or before is missing", () => {
+    const resetResult = resolveRunUsageLimitWindows({
+      driver: ProviderDriverKind.make("codex"),
+      model: "gpt-5.4",
+      before: {
+        checkedAt: checkedBefore,
+        windows: [
+          {
+            id: "primary",
+            kind: "session",
+            label: "Session",
+            usedPercent: 85,
+            resetsAt: "2026-09-03T11:58:00.000Z",
+          },
+        ],
+      },
+      after: {
+        checkedAt: checkedAfter,
+        windows: [
+          {
+            id: "primary",
+            kind: "session",
+            label: "Session",
+            usedPercent: 4,
+            resetsAt: "2026-09-03T16:58:00.000Z",
+          },
+        ],
+      },
+    });
+    expect(resetResult[0]?.remainingAfter).toBe(96);
+    expect(resetResult[0]?.usedDelta).toBe(0);
+
+    const noBefore = resolveRunUsageLimitWindows({
+      driver: ProviderDriverKind.make("codex"),
+      model: "gpt-5.4",
+      before: undefined,
+      after: {
+        checkedAt: checkedAfter,
+        windows: [{ id: "primary", kind: "session", label: "Session", usedPercent: 40 }],
+      },
+    });
+    expect(noBefore[0]?.remainingAfter).toBe(60);
+    expect(noBefore[0]?.usedDelta).toBe(0);
+  });
+
+  it("filters windows to the matching model group for Cursor and Antigravity", () => {
+    const cursorAuto = resolveRunUsageLimitWindows({
+      driver: ProviderDriverKind.make("cursor"),
+      model: "composer-2.5",
+      before: {
+        checkedAt: checkedBefore,
+        windows: [
+          { id: "totalPercentUsed", kind: "monthly", label: "Monthly", usedPercent: 30 },
+          { id: "autoPercentUsed", kind: "monthly", label: "Monthly", usedPercent: 25 },
+          { id: "apiPercentUsed", kind: "monthly", label: "Monthly", usedPercent: 50 },
+        ],
+      },
+      after: {
+        checkedAt: checkedAfter,
+        windows: [
+          { id: "totalPercentUsed", kind: "monthly", label: "Monthly", usedPercent: 35 },
+          { id: "autoPercentUsed", kind: "monthly", label: "Monthly", usedPercent: 33 },
+          { id: "apiPercentUsed", kind: "monthly", label: "Monthly", usedPercent: 50 },
+        ],
+      },
+    });
+    expect(cursorAuto.map((w) => [w.id, w.label, w.remainingAfter, w.usedDelta])).toEqual([
+      ["autoPercentUsed", "Cursor Models", 67, 8],
+    ]);
+
+    const antigravityClaude = resolveRunUsageLimitWindows({
+      driver: ProviderDriverKind.make("antigravity"),
+      model: "claude-opus-4-6",
+      before: {
+        checkedAt: checkedBefore,
+        windows: [
+          { id: "gemini-5h", kind: "session", label: "Gemini · 5-hour", usedPercent: 10 },
+          {
+            id: "3p-5h",
+            kind: "session",
+            label: "Claude & GPT (shared) · 5-hour",
+            usedPercent: 40,
+          },
+        ],
+      },
+      after: {
+        checkedAt: checkedAfter,
+        windows: [
+          { id: "gemini-5h", kind: "session", label: "Gemini · 5-hour", usedPercent: 10 },
+          {
+            id: "3p-5h",
+            kind: "session",
+            label: "Claude & GPT (shared) · 5-hour",
+            usedPercent: 55,
+          },
+        ],
+      },
+    });
+    expect(antigravityClaude.map((w) => [w.id, w.remainingAfter, w.usedDelta])).toEqual([
+      ["3p-5h", 45, 15],
+    ]);
+  });
+
+  it("preserves fractional usedDelta and formats with as many decimals as needed for one non-zero digit", () => {
+    const fractional = resolveRunUsageLimitWindows({
+      driver: ProviderDriverKind.make("codex"),
+      model: "gpt-5.4",
+      before: {
+        checkedAt: checkedBefore,
+        windows: [{ id: "primary", kind: "session", label: "Session", usedPercent: 49.12 }],
+      },
+      after: {
+        checkedAt: checkedAfter,
+        windows: [{ id: "primary", kind: "session", label: "Session", usedPercent: 49.16 }],
+      },
+    });
+    expect(fractional[0]?.usedDelta).toBeCloseTo(0.04, 10);
+    expect(formatRunUsageUsedPercent(fractional[0]?.usedDelta ?? 0)).toBe("0.04");
+    expect(formatRunUsageUsedPercent(0)).toBe("0");
+    expect(formatRunUsageUsedPercent(3.4)).toBe("3");
+    expect(formatRunUsageUsedPercent(0.5)).toBe("0.5");
+    expect(formatRunUsageUsedPercent(0.24)).toBe("0.2");
+    expect(formatRunUsageUsedPercent(0.096)).toBe("0.1");
+    expect(formatRunUsageUsedPercent(0.0042)).toBe("0.004");
+    expect(formatRunUsageUsedPercent(0.000012)).toBe("0.00001");
   });
 });

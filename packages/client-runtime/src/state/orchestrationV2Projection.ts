@@ -334,12 +334,26 @@ export function applyOrchestrationV2ProjectionEvent(
     case "run.created":
     case "run.updated": {
       // Lifecycle updates carry the run as it was when the turn started. What the run returned
-      // is written by its own event, and an update without it must not take it away.
+      // and post-turn usage limits are written by their own events, and an update without them
+      // must not take them away.
       const known = base.runs.find((run) => run.id === event.payload.id);
-      const run =
-        event.payload.output === undefined && known?.output !== undefined
-          ? { ...event.payload, output: known.output }
-          : event.payload;
+      const run: OrchestrationV2Run =
+        known === undefined
+          ? event.payload
+          : {
+              ...event.payload,
+              ...(event.payload.output === undefined && known.output !== undefined
+                ? { output: known.output }
+                : {}),
+              ...(event.payload.usageLimitsBefore === undefined &&
+              known.usageLimitsBefore !== undefined
+                ? { usageLimitsBefore: known.usageLimitsBefore }
+                : {}),
+              ...(event.payload.usageLimitsAfter === undefined &&
+              known.usageLimitsAfter !== undefined
+                ? { usageLimitsAfter: known.usageLimitsAfter }
+                : {}),
+            };
       const next = { ...base, runs: upsertEntity(base.runs, run) };
       const visible = { ...next, visibleTurnItems: activeVisibleTurnItems(next) };
       const wasQueued = known?.status === "queued";
@@ -355,6 +369,18 @@ export function applyOrchestrationV2ProjectionEvent(
             ? {
                 ...run,
                 restartCancelledBackgroundWork: event.payload.restartCancelledBackgroundWork,
+              }
+            : run,
+        ),
+      };
+    case "run.usage-limits-updated":
+      return {
+        ...base,
+        runs: base.runs.map((run) =>
+          run.id === event.payload.runId
+            ? {
+                ...run,
+                usageLimitsAfter: event.payload.usageLimitsAfter,
               }
             : run,
         ),

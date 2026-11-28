@@ -1000,6 +1000,12 @@ function preserveRunRecordedFields(
     current.restartCancelledBackgroundWork !== undefined
       ? { restartCancelledBackgroundWork: current.restartCancelledBackgroundWork }
       : {}),
+    ...(next.usageLimitsBefore === undefined && current.usageLimitsBefore !== undefined
+      ? { usageLimitsBefore: current.usageLimitsBefore }
+      : {}),
+    ...(next.usageLimitsAfter === undefined && current.usageLimitsAfter !== undefined
+      ? { usageLimitsAfter: current.usageLimitsAfter }
+      : {}),
     ...(next.explicitQueue === undefined && current.explicitQueue !== undefined
       ? { explicitQueue: current.explicitQueue }
       : {}),
@@ -1125,6 +1131,18 @@ export function applyToProjection(
             ? {
                 ...run,
                 restartCancelledBackgroundWork: event.payload.restartCancelledBackgroundWork,
+              }
+            : run,
+        ),
+      };
+    case "run.usage-limits-updated":
+      return {
+        ...base,
+        runs: base.runs.map((run) =>
+          run.id === event.payload.runId
+            ? {
+                ...run,
+                usageLimitsAfter: event.payload.usageLimitsAfter,
               }
             : run,
         ),
@@ -1373,6 +1391,9 @@ const encodeThreadUpdatedAt = Schema.encodeEffect(
 const encodeRunPayload = Schema.encodeEffect(Schema.fromJsonString(OrchestrationV2RunJsonSchema));
 const encodeRestartCancelledBackgroundWork = Schema.encodeEffect(
   Schema.fromJsonString(OrchestrationV2RunJsonSchema.fields.restartCancelledBackgroundWork),
+);
+const encodeRunUsageLimitsAfter = Schema.encodeEffect(
+  Schema.fromJsonString(OrchestrationV2RunJsonSchema.fields.usageLimitsAfter),
 );
 const encodeRunOutput = Schema.encodeEffect(
   Schema.fromJsonString(OrchestrationV2RunJsonSchema.fields.output),
@@ -2690,10 +2711,16 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, ProjectionStoreService
                 payload_json = ${keepRecordedRunOutput(
                   keepRecordedRunField(
                     keepRecordedRunField(
-                      keepRecordedRunField(sql`excluded.payload_json`, "$.delegatedCompletion"),
-                      "$.restartCancelledBackgroundWork",
+                      keepRecordedRunField(
+                        keepRecordedRunField(
+                          keepRecordedRunField(sql`excluded.payload_json`, "$.delegatedCompletion"),
+                          "$.restartCancelledBackgroundWork",
+                        ),
+                        "$.explicitQueue",
+                      ),
+                      "$.usageLimitsBefore",
                     ),
-                    "$.explicitQueue",
+                    "$.usageLimitsAfter",
                   ),
                 )}
             `;
@@ -2710,6 +2737,22 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, ProjectionStoreService
                 payload_json,
                 '$.restartCancelledBackgroundWork',
                 json(${workJson})
+              )
+              WHERE run_id = ${event.payload.runId} AND thread_id = ${event.threadId}
+            `;
+              break;
+            }
+            case "run.usage-limits-updated": {
+              // Only this field changes, so a concurrent lifecycle write is never regressed.
+              const usageLimitsJson = yield* encodeRunUsageLimitsAfter(
+                event.payload.usageLimitsAfter,
+              );
+              yield* sql`
+              UPDATE orchestration_v2_projection_runs
+              SET payload_json = json_set(
+                payload_json,
+                '$.usageLimitsAfter',
+                json(${usageLimitsJson})
               )
               WHERE run_id = ${event.payload.runId} AND thread_id = ${event.threadId}
             `;
